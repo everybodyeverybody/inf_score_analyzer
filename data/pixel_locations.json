@@ -1,0 +1,128 @@
+[
+    {
+        "state": "SP_PLAY",
+        "name": "song_title_border",
+        "y": 125,
+        "x": 478,
+        "b": 167,
+        "g": 167,
+        "r": 167
+    },
+    {
+        "state": "SP_PLAY",
+        "name": "extra_stage",
+        "y": 28,
+        "x": 478,
+        "b": 101,
+        "g": 101,
+        "r": 101
+    },
+    {
+        "state": "DP_PLAY",
+        "name": "right_play_area_border",
+        "y": 10,
+        "x": 990,
+        "b": 154,
+        "g": 154,
+        "r": 154
+    },
+    {
+        "state": "DP_PLAY",
+        "name": "left_play_area_border",
+        "y": 10,
+        "x": 290,
+        "b": 154,
+        "g": 154,
+        "r": 154
+    },
+    {
+        "state": "SONG_SELECT",
+        "name": "ornament_area_blue",
+        "y": 616,
+        "x": 0,
+        "b": 250,
+        "g": 230,
+        "r": 19
+    },
+    {
+        "state": "SONG_SELECT",
+        "name": "ticket",
+        "y": 664,
+        "x": 232,
+        "b": 150,
+        "g": 160,
+        "r": 25
+    },
+    {
+        "state": "SELECT_OPTIONS",
+        "name": "ornament_area_blue",
+        "y": 616,
+        "x": 0,
+        "b": 125,
+        "g": 115,
+        "r": 9
+    },
+    {
+        "state": "SELECT_OPTIONS",
+        "name": "ticket",
+        "y": 664,
+        "x": 232,
+        "b": 75,
+        "g": 75,
+        "r": 15
+    },
+    {
+        "state": "SELECT_OPTIONS_KEY_CONFIG",
+        "name": "ornament_area_blue",
+        "y": 616,
+        "x": 0,
+        "b": 125,
+        "g": 115,
+        "r": 9
+    },
+    {
+        "state": "SELECT_OPTIONS_KEY_CONFIG",
+        "name": "ticket",
+        "y": 664,
+        "x": 232,
+        "b": 0,
+        "g": 0,
+        "r": 0
+    },
+    {
+        "state": "1P_SCORE",
+        "name": "good",
+        "y": 556,
+        "x": 228,
+        "b": 10,
+        "g": 182,
+        "r": 240
+    },
+    {
+        "state": "1P_SCORE",
+        "name": "fast_t",
+        "y": 636,
+        "x": 50,
+        "b": 253,
+        "g": 253,
+        "r": 253
+    },
+    {
+        "state": "2P_SCORE",
+        "name": "fast_t",
+        "y": 636,
+        "x": 930,
+        "b": 253,
+        "g": 253,
+        "r": 253
+    },
+    {
+        "state": "2P_SCORE",
+        "name": "good",
+        "y": 556,
+        "x": 1108,
+        "b": 10,
+        "g": 182,
+        "r": 240
+    }
+]
