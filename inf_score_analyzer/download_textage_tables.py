@@ -9,7 +9,12 @@ from datetime import datetime
 from typing import List, Callable, Dict, Any, Union, Tuple
 
 import requests  # type: ignore
-from .local_dataclasses import Difficulty, SongMetadata, Alphanumeric
+from .local_dataclasses import (
+    Difficulty,
+    SongMetadata,
+    Alphanumeric,
+    DifficultyMetadata,
+)
 
 log = logging.getLogger(__name__)
 
@@ -194,14 +199,19 @@ def read_notes_and_bpm() -> Tuple[
     return bpm_by_textage_id, notes_by_textage_id
 
 
+def _get_textage_metadata_path() -> Path:
+    script_path = Path(os.path.dirname(os.path.realpath(sys.argv[0])))
+    textage_metadata_path = script_path / Path(".textage-metadata")
+    return textage_metadata_path
+
+
 def _check_textage_metadata_files(
     textage_javascript_file: str,
     parser_start_regex: str,
     parser_end_regex: str,
     parser_callback: Callable,
 ) -> Dict[str, Any]:
-    script_path = Path(os.path.dirname(os.path.realpath(sys.argv[0])))
-    textage_metadata_path = script_path / Path(".textage-metadata")
+    textage_metadata_path = _get_textage_metadata_path()
     os.makedirs(textage_metadata_path, exist_ok=True)
     javascript = _download_textage_javascript(
         textage_javascript_file, textage_metadata_path
@@ -213,37 +223,6 @@ def _check_textage_metadata_files(
     with open(textage_data_file, "rt") as reader:
         textage_data = json.load(reader)
     return textage_data
-
-
-def get_infinitas_song_metadata() -> Dict[str, SongMetadata]:
-    version_data = get_textage_version_data()
-    song_titles = get_textage_song_titles()
-    all_difficulties = _read_difficulty(version_data)
-    all_bpms, all_note_counts = read_notes_and_bpm()
-    infinitas_only_songs = filter_infinitas_only_songs(version_data, song_titles)
-    metadata: Dict[str, SongMetadata] = {}
-    for textage_id in infinitas_only_songs.keys():
-        difficulty_and_notes: Dict[Difficulty, Tuple[int, int]] = {}
-        difficulty: Dict[Difficulty, int] = all_difficulties[textage_id]
-        notes: Dict[Difficulty, int] = all_note_counts[textage_id]
-        difficulty_and_notes = {
-            difficulty_id: (difficulty[difficulty_id], notes[difficulty_id])
-            for difficulty_id in difficulty.keys()
-        }
-        title = " ".join(infinitas_only_songs[textage_id][5:])
-        metadata[textage_id] = SongMetadata(
-            textage_id=textage_id,
-            title=title,
-            artist=infinitas_only_songs[textage_id][4],
-            genre=infinitas_only_songs[textage_id][3],
-            version_id=int(infinitas_only_songs[textage_id][0]),
-            alphanumeric=check_alphanumeric_folder(title[0]),
-            difficulty_and_notes=difficulty_and_notes,
-            soflan=all_bpms[textage_id][0],
-            min_bpm=all_bpms[textage_id][1],
-            max_bpm=all_bpms[textage_id][2],
-        )
-    return metadata
 
 
 def filter_current_version_songs(
@@ -302,7 +281,7 @@ def get_textage_version_data() -> Dict[str, Any]:
     )
 
 
-def get_textage_song_titles():
+def get_textage_song_titles() -> Dict[str, Any]:
     def __remove_title_table_html(title_values: str) -> str:
         key, values = title_values.split(":", maxsplit=1)
         if key == "'__dmy__'":
@@ -356,6 +335,113 @@ def get_textage_version_list() -> Any:
     )
 
 
+def get_variable_bpms() -> Dict[str, Dict[Difficulty, DifficultyMetadata]]:
+    case_regex = r'^\s*case\s*"(.*?)"\s*:(.*)$'
+    if_regex = r"if\s*\((.*)\)\s*return\s*\"(.*)\""
+    break_regex = r"^\s*break\s*$"
+    bpm_cases = _read_get_bpm_javascript()
+    earlier_blocks: List[str] = []
+    variable_bpms: Dict[str, Dict[Difficulty, DifficultyMetadata]] = {}
+    for case in bpm_cases:
+        if re.match(case_regex, case):
+            textage_id, if_block = re.findall(case_regex, case)[0]
+            variable_bpms[textage_id] = {}
+            if_match = re.findall(if_regex, if_block)
+            if not if_match:
+                earlier_blocks.append(textage_id)
+                continue
+            else:
+                difficulties, bpm = if_match[0]
+                variable_bpms[textage_id].update(_read_bpm_if_block(difficulties, bpm))
+        elif re.match(break_regex, case):
+            while len(earlier_blocks) > 0:
+                earlier_textage_id = earlier_blocks.pop()
+                variable_bpms[earlier_textage_id] = variable_bpms[textage_id]
+        elif re.match(if_regex, case):
+            if_block = re.findall(if_regex, case)
+            if not if_block:
+                raise RuntimeError("The formatting on the source has changed.")
+            difficulties, bpm = if_block[0]
+            variable_bpms[textage_id].update(_read_bpm_if_block(difficulties, bpm))
+    return variable_bpms
+
+
+def _read_bpm_if_block(
+    difficulties: str, bpm: str
+) -> Dict[Difficulty, DifficultyMetadata]:
+    type_regex = r"type\s*([=<>]+)\s*(\d+)"
+    bpm_parts = bpm.split("〜")
+    if len(bpm_parts) == 2:
+        bpms = DifficultyMetadata(
+            min_bpm=int(bpm_parts[0]), max_bpm=int(bpm_parts[1]), soflan=True
+        )
+    elif len(bpm_parts) == 1:
+        bpms = DifficultyMetadata(
+            min_bpm=int(bpm_parts[0]), max_bpm=int(bpm_parts[0]), soflan=False
+        )
+    else:
+        raise RuntimeError(f"Cannot read BPM from {bpm}")
+    if_block_parts = difficulties.split("||")
+    bpm_by_difficulty: Dict[Difficulty, DifficultyMetadata] = {}
+    for part in if_block_parts:
+        if not re.match(type_regex, part):
+            raise RuntimeError("The if-statements in get_bpm have changed.")
+        else:
+            comparator, difficulty_str = re.findall(type_regex, part)[0]
+            difficulty_value = int(difficulty_str)
+            if comparator == "==":
+                diff = Difficulty(difficulty_value)
+                bpm_by_difficulty[diff] = bpms
+            elif comparator == ">=":
+                for member in Difficulty:
+                    if (
+                        member.value >= difficulty_value
+                        and member.value != Difficulty.UNKNOWN
+                    ):
+                        bpm_by_difficulty[member] = bpms
+            elif comparator == "<=":
+                for member in Difficulty:
+                    if (
+                        member.value <= difficulty_value
+                        and member.value != Difficulty.UNKNOWN
+                    ):
+                        bpm_by_difficulty[member] = bpms
+            else:
+                raise RuntimeError(f"Cannot handle comparator {comparator} in js")
+    return bpm_by_difficulty
+
+
+def _read_get_bpm_javascript() -> List[str]:
+    """
+    This parses the javascript logic in datatbl.js specifically
+    to extract songs with BPM changes across difficulties
+    """
+    textage_metadata_path = _get_textage_metadata_path()
+    data_table_file = textage_metadata_path / "datatbl.js"
+    case_lines: List[str] = []
+    with open(data_table_file, "rt") as data_table_reader:
+        inside_bpm_function = False
+        inside_bpm_switch = False
+        bpm_regex = r"^\s*function\s*get_bpm\s*\(.*$"
+        switch_regex = r"^\s*switch\s*\(\s*tag\s*\)\s*{.*$"
+        end_regex = r".*\}.*"
+        for raw_line in data_table_reader:
+            line = raw_line.strip()
+            if inside_bpm_function and inside_bpm_switch:
+                if re.match(end_regex, line):
+                    break
+                blocks = [block.strip() for block in line.split(";") if block != ""]
+                case_lines.extend(blocks)
+                continue
+            elif re.match(bpm_regex, line):
+                inside_bpm_function = True
+                continue
+            elif inside_bpm_function and re.match(switch_regex, line):
+                inside_bpm_switch = True
+                continue
+    return case_lines
+
+
 def check_alphanumeric_folder(char: str) -> Alphanumeric:
     if re.match("[ABCD]", char, re.IGNORECASE):
         return Alphanumeric.ABCD
@@ -373,92 +459,86 @@ def check_alphanumeric_folder(char: str) -> Alphanumeric:
         return Alphanumeric.OTHERS
 
 
-def get_current_version_song_metadata_not_in_infinitas() -> Dict[str, SongMetadata]:
-    # This file was combined from two projects that had not yet settled
-    # on an API, and so has some repeat methods
+def _build_song_metadata_dict(
+    version_data: Dict[str, Any],
+    song_titles: Dict[str, Any],
+    song_list: Dict[str, List[str]],
+) -> Any:
+    all_difficulties = _read_difficulty(version_data)
+    all_bpms, all_note_counts = read_notes_and_bpm()
+    variable_bpms = get_variable_bpms()
+    version_list = get_textage_version_list()
+    metadata: Dict[str, SongMetadata] = {}
+    for textage_id in song_list.keys():
+        difficulty_metadata: Dict[Difficulty, DifficultyMetadata] = {}
+        song_difficulty: Dict[Difficulty, int] = all_difficulties[textage_id]
+        notes: Dict[Difficulty, int] = all_note_counts[textage_id]
+        title = " ".join(song_list[textage_id][5:])
+        version_id = int(song_list[textage_id][0])
+        # substream is last in textage js
+        if version_id == 35:
+            version_id = -1
+        version = version_list[version_id]
+        for diff_id in song_difficulty.keys():
+            if song_difficulty[diff_id] == 0 or notes[diff_id] == 0:
+                continue
+            if textage_id in variable_bpms and diff_id in variable_bpms[textage_id]:
+                difficulty_metadata[diff_id] = variable_bpms[textage_id][diff_id]
+            else:
+                difficulty_metadata[diff_id] = DifficultyMetadata(
+                    soflan=all_bpms[textage_id][0],
+                    min_bpm=all_bpms[textage_id][1],
+                    max_bpm=all_bpms[textage_id][2],
+                )
+            difficulty_metadata[diff_id].notes = notes[diff_id]
+            difficulty_metadata[diff_id].level = song_difficulty[diff_id]
+        metadata[textage_id] = SongMetadata(
+            textage_id=textage_id,
+            title=title,
+            artist=song_list[textage_id][4],
+            genre=song_list[textage_id][3],
+            textage_version_id=version_id,
+            version=version,
+            alphanumeric=check_alphanumeric_folder(title[0]),
+            difficulty_metadata=difficulty_metadata,
+        )
+    return metadata
+
+
+def get_infinitas_song_metadata() -> Dict[str, SongMetadata]:
     version_data = get_textage_version_data()
     song_titles = get_textage_song_titles()
-    all_bpms, all_note_counts = read_notes_and_bpm()
-    all_difficulties = _read_difficulty(version_data)
-    version_list = get_textage_version_list()
+    infinitas_only_songs = filter_infinitas_only_songs(version_data, song_titles)
+    return _build_song_metadata_dict(version_data, song_titles, infinitas_only_songs)
+
+
+def get_current_version_song_metadata_not_in_infinitas() -> Dict[str, SongMetadata]:
+    version_data = get_textage_version_data()
+    song_titles = get_textage_song_titles()
     current_version_songs = filter_current_version_songs(version_data, song_titles)
     infinitas_only_songs = filter_infinitas_only_songs(version_data, song_titles)
     inf_keys = set(list(infinitas_only_songs.keys()))
     cur_ver_keys = set(list(current_version_songs.keys()))
     not_in_inf_keys = cur_ver_keys.difference(inf_keys)
-    not_in_inf_song_metadata = {}
-    for textage_id in sorted(not_in_inf_keys):
-        version_id = int(current_version_songs[textage_id][0])
-        title = " ".join(song_titles[textage_id][5:])
-        # substream is last in textage js
-        if version_id == 35:
-            version_id = -1
-        difficulty_and_notes: Dict[Difficulty, Tuple[int, int]] = {}
-        difficulty: Dict[Difficulty, int] = all_difficulties[textage_id]
-        notes: Dict[Difficulty, int] = all_note_counts[textage_id]
-        difficulty_and_notes = {
-            difficulty_id: (difficulty[difficulty_id], notes[difficulty_id])
-            for difficulty_id in difficulty.keys()
-        }
-        song_metadata = SongMetadata(
-            textage_id=textage_id,
-            title=title,
-            artist=song_titles[textage_id][4],
-            genre=song_titles[textage_id][3],
-            version_id=version_id,
-            version=version_list[version_id],
-            difficulty_and_notes=difficulty_and_notes,
-            alphanumeric=check_alphanumeric_folder(title[0]),
-            soflan=all_bpms[textage_id][0],
-            min_bpm=all_bpms[textage_id][1],
-            max_bpm=all_bpms[textage_id][2],
-        )
-        not_in_inf_song_metadata[textage_id] = song_metadata
-    return not_in_inf_song_metadata
+    not_in_inf_songs = {
+        textage_id: current_version_songs[textage_id] for textage_id in not_in_inf_keys
+    }
+    return _build_song_metadata_dict(version_data, song_titles, not_in_inf_songs)
 
 
 def get_all_song_metadata() -> Dict[str, SongMetadata]:
-    all_song_metadata: Dict[str, SongMetadata] = {}
     version_data = get_textage_version_data()
     song_titles = get_textage_song_titles()
-    all_bpms, all_note_counts = read_notes_and_bpm()
-    all_difficulties = _read_difficulty(version_data)
-    version_list = get_textage_version_list()
-    song_titles_by_textage_id = {}
-    for tag, title_version_metadata in song_titles.items():
-        if tag not in version_data:
-            log.warning(f"could not find {tag}:{title_version_metadata}")
+    validated_songs = {}
+    for textage_id, title_version_metadata in song_titles.items():
+        if textage_id not in version_data:
+            log.warning(f"could not find {textage_id}:{title_version_metadata}")
             continue
         # scrlist.js line 682
-        song_titles_by_textage_id[tag] = title_version_metadata
-
-    for textage_id in version_data.keys():
-        version_id = song_titles_by_textage_id[textage_id][0]
-        title = " ".join(song_titles[textage_id][5:])
-        difficulty_and_notes: Dict[Difficulty, Tuple[int, int]] = {}
-        difficulty: Dict[Difficulty, int] = all_difficulties[textage_id]
-        notes: Dict[Difficulty, int] = all_note_counts[textage_id]
-        difficulty_and_notes = {
-            difficulty_id: (difficulty[difficulty_id], notes[difficulty_id])
-            for difficulty_id in difficulty.keys()
-        }
-        song_metadata = SongMetadata(
-            textage_id=textage_id,
-            title=title,
-            artist=song_titles[textage_id][4],
-            genre=song_titles[textage_id][3],
-            version_id=version_id,
-            version=version_list[version_id],
-            difficulty_and_notes=difficulty_and_notes,
-            alphanumeric=check_alphanumeric_folder(title[0]),
-            soflan=all_bpms[textage_id][0],
-            min_bpm=all_bpms[textage_id][1],
-            max_bpm=all_bpms[textage_id][2],
-        )
-        all_song_metadata[textage_id] = song_metadata
-    return all_song_metadata
+        validated_songs[textage_id] = title_version_metadata
+    return _build_song_metadata_dict(version_data, song_titles, validated_songs)
 
 
 if __name__ == "__main__":
-    for key, value in get_all_song_metadata().items():
+    for key, value in sorted(get_all_song_metadata().items()):
         print(value.to_dict())

@@ -82,33 +82,25 @@ class ClearType(Enum):
     UNKNOWN = 99
 
 
-def generate_song_metadata_difficulties_and_note_counts(
-    sp_normal: int = 0,
-    sp_normal_notes: int = 0,
-    sp_hyper: int = 0,
-    sp_hyper_notes: int = 0,
-    sp_another: int = 0,
-    sp_another_notes: int = 0,
-    sp_leggendaria: int = 0,
-    sp_leggendaria_notes: int = 0,
-    dp_normal: int = 0,
-    dp_normal_notes: int = 0,
-    dp_hyper: int = 0,
-    dp_hyper_notes: int = 0,
-    dp_another: int = 0,
-    dp_another_notes: int = 0,
-    dp_leggendaria: int = 0,
-    dp_leggendaria_notes: int = 0,
-) -> Dict[Difficulty, Tuple[int, int]]:
+@dataclass
+class DifficultyMetadata:
+    level: int = 0
+    notes: int = 0
+    min_bpm: int = 0
+    max_bpm: int = 0
+    soflan: bool = False
+
+
+def generate_difficulty_metadata() -> Dict[Difficulty, DifficultyMetadata]:
     return {
-        Difficulty.SP_NORMAL: (sp_normal, sp_normal_notes),
-        Difficulty.SP_HYPER: (sp_hyper, sp_hyper_notes),
-        Difficulty.SP_ANOTHER: (sp_another, sp_another_notes),
-        Difficulty.SP_LEGGENDARIA: (sp_leggendaria, sp_leggendaria_notes),
-        Difficulty.DP_NORMAL: (dp_normal, dp_normal_notes),
-        Difficulty.DP_HYPER: (dp_hyper, dp_hyper_notes),
-        Difficulty.DP_ANOTHER: (dp_another, dp_another_notes),
-        Difficulty.DP_LEGGENDARIA: (dp_leggendaria, dp_leggendaria_notes),
+        Difficulty.SP_NORMAL: DifficultyMetadata(),
+        Difficulty.SP_HYPER: DifficultyMetadata(),
+        Difficulty.SP_ANOTHER: DifficultyMetadata(),
+        Difficulty.SP_LEGGENDARIA: DifficultyMetadata(),
+        Difficulty.DP_NORMAL: DifficultyMetadata(),
+        Difficulty.DP_HYPER: DifficultyMetadata(),
+        Difficulty.DP_ANOTHER: DifficultyMetadata(),
+        Difficulty.DP_LEGGENDARIA: DifficultyMetadata(),
     }
 
 
@@ -118,15 +110,12 @@ class SongMetadata:
     title: str
     artist: str
     genre: str
-    version_id: int
+    textage_version_id: int
     alphanumeric: Alphanumeric
-    difficulty_and_notes: Dict[Difficulty, Tuple[int, int]] = field(
-        default_factory=generate_song_metadata_difficulties_and_note_counts
+    difficulty_metadata: Dict[Difficulty, DifficultyMetadata] = field(
+        default_factory=generate_difficulty_metadata
     )
-    soflan: bool = False
     version: str = ""
-    min_bpm: int = 0
-    max_bpm: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -134,20 +123,20 @@ class SongMetadata:
             "title": self.title,
             "artist": self.artist,
             "genre": self.genre,
-            "version_id": self.version_id,
+            "textage_version_id": self.version_id,
             "version": self.version,
             "alphanumeric": self.alphanumeric.name,
-            "soflan": self.soflan,
-            "min_bpm": self.min_bpm,
-            "max_bpm": self.max_bpm,
-            "difficulty_and_notes": {
+            "difficulty_metadata": {
                 difficulty.name: {
-                    "level": self.difficulty_and_notes[difficulty][0],
-                    "notes": self.difficulty_and_notes[difficulty][1],
+                    "level": self.difficulty_metadata[difficulty].level,
+                    "notes": self.difficulty_metadata[difficulty].notes,
+                    "soflan": self.difficulty_metadata[difficulty].soflan,
+                    "min_bpm": self.difficulty_metadata[difficulty].min_bpm,
+                    "max_bpm": self.difficulty_metadata[difficulty].max_bpm,
                 }
-                for difficulty in self.difficulty_and_notes.keys()
-                if self.difficulty_and_notes[difficulty][0] != 0
-                and self.difficulty_and_notes[difficulty][1] != 0
+                for difficulty in self.difficulty_metadata.keys()
+                if self.difficulty_metadata[difficulty].notes != 0
+                and self.difficulty_metadata[difficulty].level != 0
             },
         }
 
