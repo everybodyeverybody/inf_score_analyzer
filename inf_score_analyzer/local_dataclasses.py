@@ -156,7 +156,7 @@ class SongMetadata:
         between 1 and 2. (that's what all the 0 padding is for
         in the return string)
         """
-        unchecked_version_id: int = self.version_id
+        unchecked_version_id: int = self.textage_version_id
         checked_version_id: float = 0.0
         # substream textage workaround
         if unchecked_version_id == -1:
@@ -165,62 +165,50 @@ class SongMetadata:
             checked_version_id = float(unchecked_version_id)
         return f"{checked_version_id:04.1f} {self.sort_by_alphanumeric()}"
 
-    def __check_difficulty_rate(self, difficulty_level: int) -> str:
+    def __check_difficulty_rate(self, difficulty: Difficulty) -> str:
         """
         Set any blanks to appear after other entries by setting them to ZZZ.
         Otherwise prepend 0s to any single digit difficulties for string
         based sorting.
         """
-        if difficulty_level < 1:
+        if (
+            difficulty not in self.difficulty_metadata
+            or self.difficulty_metadata[difficulty].level == 0
+        ):
             return "ZZZ"
-        return f"{difficulty_level:02d}"
+        return f"{self.difficulty_metadata[difficulty].level:02d}"
 
     def sort_by_spn(self) -> str:
-        rate = self.__check_difficulty_rate(
-            self.difficulty_and_notes[Difficulty.SP_NORMAL][0]
-        )
+        rate = self.__check_difficulty_rate(Difficulty.SP_NORMAL)
+        print(f"{rate} " + self.sort_by_alphanumeric())
         return f"{rate} " + self.sort_by_alphanumeric()
 
     def sort_by_sph(self) -> str:
-        rate = self.__check_difficulty_rate(
-            self.difficulty_and_notes[Difficulty.SP_HYPER][0]
-        )
+        rate = self.__check_difficulty_rate(Difficulty.SP_HYPER)
         return f"{rate} " + self.sort_by_alphanumeric()
 
     def sort_by_spa(self) -> str:
-        rate = self.__check_difficulty_rate(
-            self.difficulty_and_notes[Difficulty.SP_ANOTHER][0]
-        )
+        rate = self.__check_difficulty_rate(Difficulty.SP_ANOTHER)
         return f"{rate} " + self.sort_by_alphanumeric()
 
     def sort_by_spl(self) -> str:
-        rate = self.__check_difficulty_rate(
-            self.difficulty_and_notes[Difficulty.SP_LEGGENDARIA][0]
-        )
+        rate = self.__check_difficulty_rate(Difficulty.SP_LEGGENDARIA)
         return f"{rate} " + self.sort_by_alphanumeric()
 
     def sort_by_dpn(self) -> str:
-        rate = self.__check_difficulty_rate(
-            self.difficulty_and_notes[Difficulty.DP_NORMAL][0]
-        )
+        rate = self.__check_difficulty_rate(Difficulty.DP_NORMAL)
         return f"{rate} " + self.sort_by_alphanumeric()
 
     def sort_by_dph(self) -> str:
-        rate = self.__check_difficulty_rate(
-            self.difficulty_and_notes[Difficulty.DP_HYPER][0]
-        )
+        rate = self.__check_difficulty_rate(Difficulty.DP_HYPER)
         return f"{rate} " + self.sort_by_alphanumeric()
 
     def sort_by_dpa(self) -> str:
-        rate = self.__check_difficulty_rate(
-            self.difficulty_and_notes[Difficulty.DP_ANOTHER][0]
-        )
+        rate = self.__check_difficulty_rate(Difficulty.DP_ANOTHER)
         return f"{rate} " + self.sort_by_alphanumeric()
 
     def sort_by_dpl(self) -> str:
-        rate = self.__check_difficulty_rate(
-            self.difficulty_and_notes[Difficulty.DP_LEGGENDARIA][0]
-        )
+        rate = self.__check_difficulty_rate(Difficulty.DP_LEGGENDARIA)
         return f"{rate} " + self.sort_by_alphanumeric()
 
 
