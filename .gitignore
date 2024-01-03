@@ -10,6 +10,7 @@ data/percentages/
 data/play_frames/
 data/raw_frames/
 data/score_frames/
+data/png-dumps/
 # C extensions
 *.so
 

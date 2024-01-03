@@ -23,7 +23,7 @@ from .local_dataclasses import (
     SongReference,
     VideoProcessingState,
 )
-from .sqlite_setup import sqlite_setup
+from .sqlite_setup import sqlite_setup, read_song_data_from_db
 from .play_frame_processor import (
     get_ocr_song_title_from_play_frame,
     read_play_metadata,
@@ -154,6 +154,7 @@ def video_processing_loop(
     song_reference: SongReference,
 ) -> None:
     with video_capture(source_id) as video, ProcessPoolExecutor(max_workers=1) as ocr:
+        log.info("Starting video processing loop")
         __loop(state_pixels, session_uuid, song_reference, ocr, video)
     return
 
@@ -194,53 +195,6 @@ def parse_arguments() -> argparse.Namespace:
         default=False,
     )
     return parser.parse_args()
-
-
-def read_song_data_from_db() -> SongReference:
-    query = (
-        "select s.textage_id,d.difficulty,sd.level,sd.notes,s.min_bpm, "
-        "s.max_bpm, s.artist,s.title "
-        "from songs s "
-        "join song_difficulty_and_notes sd "
-        "on sd.textage_id=s.textage_id "
-        "join difficulty d on d.difficulty_id=sd.difficulty_id "
-        "where sd.level!=0 order by sd.textage_id,sd.level"
-    )
-    songs_by_title: Dict[str, str] = {}
-    songs_by_artist: Dict[str, Set[str]] = {}
-    songs_by_difficulty: Dict[Tuple[str, int], Set[str]] = {}
-    songs_by_bpm: Dict[Tuple[int, int], Set[str]] = {}
-    songs_by_notes: Dict[int, Set[str]] = {}
-    app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
-    db_cursor = app_db_connection.cursor()
-    result = db_cursor.execute(query)
-    for row in result.fetchall():
-        textage_id = row[0]
-        notes = row[3]
-        cleaned_artist = row[6].strip()
-        cleaned_title = row[7].strip()
-        songs_by_title[cleaned_title] = textage_id
-        bpm_tuple: Tuple[int, int] = (row[4], row[5])
-        difficulty_tuple: Tuple[str, int] = (row[1], row[2])
-        if cleaned_artist not in songs_by_artist:
-            songs_by_artist[cleaned_artist] = set([])
-        songs_by_artist[cleaned_artist].add(textage_id)
-        if difficulty_tuple not in songs_by_difficulty:
-            songs_by_difficulty[difficulty_tuple] = set([])
-        songs_by_difficulty[difficulty_tuple].add(textage_id)
-        if bpm_tuple not in songs_by_bpm:
-            songs_by_bpm[bpm_tuple] = set([])
-        if notes not in songs_by_notes:
-            songs_by_notes[notes] = set([])
-        songs_by_bpm[bpm_tuple].add(textage_id)
-        songs_by_notes[notes].add(textage_id)
-    return SongReference(
-        by_artist=songs_by_artist,
-        by_difficulty=songs_by_difficulty,
-        by_title=songs_by_title,
-        by_note_count=songs_by_notes,
-        by_bpm=songs_by_bpm,
-    )
 
 
 def end_session(session_uuid: str) -> None:

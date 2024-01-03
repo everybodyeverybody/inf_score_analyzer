@@ -6,6 +6,7 @@ from datetime import datetime
 from dataclasses import asdict
 from . import constants as CONSTANTS
 from .download_textage_tables import get_infinitas_song_metadata
+from .local_dataclasses import SongReference
 
 log = logging.getLogger(__name__)
 
@@ -96,21 +97,22 @@ def create_app_database():
         "title text,"
         "artist text,"
         "genre text,"
-        "soflan integer,"
-        "min_bpm integer,"
-        "max_bpm integer,"
-        "version_id integer)"
+        "textage_version_id integer,"
+        "version text)"
     )
     create_song_difficulty_table_query = (
-        "create table if not exists song_difficulty_and_notes("
+        "create table if not exists song_difficulty_metadata("
         "textage_id text,"
         "difficulty_id integer,"
         "level integer,"
-        "notes integer)"
+        "notes integer,"
+        "soflan integer,"
+        "min_bpm integer,"
+        "max_bpm integer)"
     )
     create_song_difficulty_index_query = (
         "create unique index if not exists song_difficulty_index "
-        "on song_difficulty_and_notes(textage_id, difficulty_id)"
+        "on song_difficulty_metadata(textage_id, difficulty_id)"
     )
     create_difficulty_table_query = (
         "create table if not exists difficulty("
@@ -162,36 +164,98 @@ def populate_song_metadata_into_db():
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     app_db_cursor = app_db_connection.cursor()
     song_difficulty_insert_query = (
-        "insert or replace into song_difficulty_and_notes "
-        "(textage_id,difficulty_id,level,notes) values (?,?,?,?);"
+        "insert or replace into song_difficulty_metadata ("
+        "textage_id, "
+        "difficulty_id, "
+        "level, "
+        "notes, "
+        "soflan, "
+        "min_bpm, "
+        "max_bpm"
+        ") values (?,?,?,?,?,?,?)"
     )
-    for textage_id, song_data in song_metadata.items():
-        song_insert_query = (
-            "insert or replace into songs ( "
-            "textage_id,"
-            "title,"
-            "artist,"
-            "genre,"
-            "soflan,"
-            "min_bpm,"
-            "max_bpm,"
-            "version_id) values ("
-            ":textage_id,"
-            ":title,"
-            ":artist,"
-            ":genre,"
-            ":soflan,"
-            ":min_bpm,"
-            ":max_bpm,"
-            "0"
-            ");"
+    song_insert_query = (
+        "insert or replace into songs ( "
+        "textage_id,"
+        "title,"
+        "artist,"
+        "genre,"
+        "textage_version_id, "
+        "version"
+        ") values (?,?,?,?,?,?)"
+    )
+    for textage_id, song in song_metadata.items():
+        app_db_cursor.execute(
+            song_insert_query,
+            (
+                song.textage_id,
+                song.title,
+                song.artist,
+                song.genre,
+                song.textage_version_id,
+                song.version,
+            ),
         )
-        app_db_cursor.execute(song_insert_query, asdict(song_data))
-        for difficulty in song_data.difficulty_and_notes.keys():
-            level = song_data.difficulty_and_notes[difficulty][0]
-            notes = song_data.difficulty_and_notes[difficulty][1]
+        for difficulty in song.difficulty_metadata.keys():
+            metadata = song.difficulty_metadata[difficulty]
             app_db_cursor.execute(
                 song_difficulty_insert_query,
-                (song_data.textage_id, difficulty.value, level, notes),
+                (
+                    song.textage_id,
+                    difficulty.value,
+                    metadata.level,
+                    metadata.notes,
+                    metadata.soflan,
+                    metadata.min_bpm,
+                    metadata.max_bpm,
+                ),
             )
         app_db_connection.commit()
+
+
+def read_song_data_from_db() -> SongReference:
+    log.info(f"Loading in song info from {CONSTANTS.APP_DB}")
+    query = (
+        "select s.textage_id,d.difficulty,sd.level,sd.notes,sd.min_bpm, "
+        "sd.max_bpm, s.artist,s.title "
+        "from songs s "
+        "join song_difficulty_metadata sd "
+        "on sd.textage_id=s.textage_id "
+        "join difficulty d on d.difficulty_id=sd.difficulty_id "
+        "where sd.level!=0 order by sd.textage_id,sd.level"
+    )
+    songs_by_title: Dict[str, str] = {}
+    songs_by_artist: Dict[str, Set[str]] = {}
+    songs_by_difficulty: Dict[Tuple[str, int], Set[str]] = {}
+    songs_by_bpm: Dict[Tuple[int, int], Set[str]] = {}
+    songs_by_notes: Dict[int, Set[str]] = {}
+    app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
+    db_cursor = app_db_connection.cursor()
+    result = db_cursor.execute(query)
+    for row in result.fetchall():
+        textage_id = row[0]
+        notes = row[3]
+        cleaned_artist = row[6].strip()
+        cleaned_title = row[7].strip()
+        songs_by_title[cleaned_title] = textage_id
+        bpm_tuple: Tuple[int, int] = (row[4], row[5])
+        difficulty_tuple: Tuple[str, int] = (row[1], row[2])
+        if cleaned_artist not in songs_by_artist:
+            songs_by_artist[cleaned_artist] = set([])
+        songs_by_artist[cleaned_artist].add(textage_id)
+        if difficulty_tuple not in songs_by_difficulty:
+            songs_by_difficulty[difficulty_tuple] = set([])
+        songs_by_difficulty[difficulty_tuple].add(textage_id)
+        if bpm_tuple not in songs_by_bpm:
+            songs_by_bpm[bpm_tuple] = set([])
+        if notes not in songs_by_notes:
+            songs_by_notes[notes] = set([])
+        songs_by_bpm[bpm_tuple].add(textage_id)
+        songs_by_notes[notes].add(textage_id)
+    return SongReference(
+        by_artist=songs_by_artist,
+        by_difficulty=songs_by_difficulty,
+        by_title=songs_by_title,
+        by_note_count=songs_by_notes,
+        by_bpm=songs_by_bpm,
+    )
