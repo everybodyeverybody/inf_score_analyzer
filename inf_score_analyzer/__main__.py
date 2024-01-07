@@ -59,7 +59,7 @@ def __loop(
                 coalesced_states = set(frame_queue)
                 if coalesced_states == {"SP_PLAY"} or coalesced_states == {"DP_PLAY"}:
                     if v.play_metadata_missing():
-                        play_metadata = read_play_metadata(frame_count, frame)
+                        play_metadata = read_play_metadata(frame_count, frame, v)
                         v.difficulty = play_metadata[0]
                         v.level = play_metadata[1]
                         v.lifebar_type = play_metadata[2]
