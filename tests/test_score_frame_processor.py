@@ -101,7 +101,7 @@ def test_get_score_from_result_screen():
         )
 
     for file in results:
-        logging.error(file)
+        logging.info(file)
         assert results[file] == SCORE_FRAMES[file]
 
 

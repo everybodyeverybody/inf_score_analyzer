@@ -9,8 +9,9 @@ from .frame_utilities import (
     is_white,
     is_black,
     read_pixel,
+    dump_to_png,
 )
-from .local_dataclasses import Point, OCRSongTitles
+from .local_dataclasses import Point, OCRSongTitles, VideoProcessingState
 from . import constants as CONSTANTS
 
 log = logging.getLogger(__name__)
@@ -316,6 +317,7 @@ def read_side_and_doubles(play_frame: NDArray) -> Tuple[bool, bool]:
         left_side = False
         is_double = True
     else:
+        dump_to_png(play_frame, "doubles", 1)
         log.error(f"sp left color: {sp_left_color}")
         log.error(f"sp right color: {sp_right_color}")
         log.error(f"dp left color: {dp_left_color}")
@@ -374,6 +376,8 @@ def read_play_difficulty(play_frame: NDArray, left_side: bool, is_double: bool) 
     ):
         difficulty = "BEGINNER"
     if difficulty == "UNKNOWN":
+        if CONSTANTS.DEV_MODE:
+            dump_to_png(play_frame, "play_difficulty", 112)
         return difficulty
     else:
         return f"{single_or_double}_{difficulty}"
@@ -382,6 +386,8 @@ def read_play_difficulty(play_frame: NDArray, left_side: bool, is_double: bool) 
 def read_play_lifebar_type(
     play_frame: NDArray, left_side: bool, is_double: bool
 ) -> str:
+    if CONSTANTS.DEV_MODE:
+        dump_to_png(play_frame, "play_lifebar", 1100)
     if left_side and not is_double:
         lifebar_point = Point(y=600, x=28)
     if not left_side and not is_double:
@@ -393,11 +399,12 @@ def read_play_lifebar_type(
     lifebar_color = play_frame[lifebar_point.y][lifebar_point.x]
     if lifebar_color[0] >= 180 and lifebar_color[0] <= 220:
         return "NORMAL"
-    elif lifebar_color[1] <= 20 and lifebar_color[2] >= 140:
+    elif lifebar_color[1] <= 30 and lifebar_color[2] >= 130:
         return "HARD"
     elif lifebar_color[1] >= 95 and lifebar_color[2] >= 170:
         return "EXHARD"
     else:
+        log.warning(f"LIFEBAR COLOR: {lifebar_color}")
         return "UNKNOWN"
 
 
@@ -621,11 +628,34 @@ def read_bpm(frame: NDArray, left_side: bool, is_double: bool) -> Tuple[int, int
 
 
 def read_play_metadata(
-    play_frame_count: int, play_frame: NDArray
+    play_frame_count: int,
+    play_frame: NDArray,
+    video_processing_state: VideoProcessingState,
 ) -> Tuple[str, int, str, int, int, bool, bool]:
-    left_side, is_double = read_side_and_doubles(play_frame)
-    difficulty = read_play_difficulty(play_frame, left_side, is_double)
-    level = read_play_level(play_frame, left_side, is_double)
-    lifebar_type = read_play_lifebar_type(play_frame, left_side, is_double)
-    min_bpm, max_bpm = read_bpm(play_frame, left_side, is_double)
+
+    if (
+        video_processing_state.left_side is None
+        or video_processing_state.is_double is None
+    ):
+        left_side, is_double = read_side_and_doubles(play_frame)
+    else:
+        left_side = video_processing_state.left_side
+        is_double = video_processing_state.is_double
+    if video_processing_state.difficulty is None:
+        difficulty = read_play_difficulty(play_frame, left_side, is_double)
+    else:
+        difficulty = video_processing_state.difficulty
+    if video_processing_state.level is None:
+        level = read_play_level(play_frame, left_side, is_double)
+    else:
+        level = video_processing_state.level
+    if video_processing_state.lifebar_type is None:
+        lifebar_type = read_play_lifebar_type(play_frame, left_side, is_double)
+    else:
+        lifebar_type = video_processing_state.difficulty
+    if video_processing_state.min_bpm is None or video_processing_state.max_bpm is None:
+        min_bpm, max_bpm = read_bpm(play_frame, left_side, is_double)
+    else:
+        min_bpm = video_processing_state.min_bpm
+        max_bpm = video_processing_state.max_bpm
     return difficulty, level, lifebar_type, min_bpm, max_bpm, left_side, is_double
