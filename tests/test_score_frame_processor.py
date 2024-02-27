@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import logging
 import cv2 as cv  # type: ignore
-from inf_score_analyzer.local_dataclasses import Score
+from inf_score_analyzer.local_dataclasses import Score, OCRSongTitles
 from inf_score_analyzer.score_frame_processor import (
     get_score_from_result_screen,
     get_note_count,
     get_clear_type_from_results_screen,
+    metadata_lookup_tiebreaker,
 )
 
 from inf_score_analyzer.local_dataclasses import ClearType
@@ -150,3 +151,15 @@ def test_clear_type_processor():
         assert left_results[file] == LEFT_CLEAR_TYPE_FRAMES[file]
     for file in right_results:
         assert right_results[file] == RIGHT_CLEAR_TYPE_FRAMES[file]
+
+
+def test_metadata_tie_breaker():
+    ocr = OCRSongTitles(
+        en_title="RootAge",
+        en_artist='BEMANI Sound Team "HureR+"',
+        jp_title="RootAge",
+        jp_artist='BEMANI Sound Team "HuzeR十"',
+    )
+    metadata_titles = {"rootage", "gigathra", "divinehv"}
+    correct_title = "rootage"
+    assert correct_title == metadata_lookup_tiebreaker(metadata_titles, ocr)

@@ -51,8 +51,9 @@ def write_score_sqlite(
             log.info("Using metadata title")
             referenced_textage_id = metadata_title.pop()
         else:
-            log.warning(f"Found too much metadata, {metadata_title}")
+            log.warning(f"Found too much metadata, {metadata_title}, tiebreaking")
             referenced_textage_id = metadata_lookup_tiebreaker(metadata_title, title)
+            log.warning(f"Tiebreaker found: {referenced_textage_id}")
 
     difficulty_id = Difficulty[difficulty].value
     log.info(f"Difficulty: {Difficulty[difficulty]}")
@@ -133,24 +134,54 @@ def write_score_sqlite(
 def metadata_lookup_tiebreaker(
     metadata_titles: Set[str], ocr_titles: OCRSongTitles
 ) -> str:
+    """
+    Calculates the levenshtein distance on songs that match
+    play metadata (note count, difficulty, bpm) versus
+    what is provided by our OCR library to determine
+    the song title.
+
+    In cases of ties, this raises an exception, indicating
+    we have missed some special case or overlap, or that
+    OCR is underperforming or outputting garbage.
+
+    https://en.wikipedia.org/wiki/Levenshtein_distance
+    """
+    lowest_score = -1
+    lowest_textage_id = None
+    lowest_has_tie = False
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     db_cursor = app_db_connection.cursor()
     ids_as_string = ",".join([f"'{id}'" for id in metadata_titles])
-    query = f"select textage_id, artist, title from songs where textage_id in ({ids_as_string})"
+    query = (
+        "select textage_id, artist, title "
+        "from songs "
+        f"where textage_id in ({ids_as_string})"
+    )
     results = db_cursor.execute(query).fetchall()
-    lowest_score_title = (-1, "")
-    for song in results:
-        score = polyleven.levenshtein(ocr_titles.en_artist, song[1])
-        score += polyleven.levenshtein(ocr_titles.en_title, song[2])
-        score += polyleven.levenshtein(ocr_titles.jp_artist, song[1])
-        score += polyleven.levenshtein(ocr_titles.jp_title, song[2])
-        if lowest_score_title[0] == -1 or score <= lowest_score_title[0]:
-            if score == lowest_score_title[0]:
-                raise RuntimeError(
-                    f"Couldn't figure out the song, my bad {metadata_titles} ocr {ocr_titles}"
-                )
-            lowest_score_title = (score, song[0])
-    return lowest_score_title[1]
+    scores = {}
+    for textage_id, artist, title in results:
+        score = polyleven.levenshtein(ocr_titles.en_artist, artist)
+        score += polyleven.levenshtein(ocr_titles.en_title, title)
+        score += polyleven.levenshtein(ocr_titles.jp_artist, artist)
+        score += polyleven.levenshtein(ocr_titles.jp_title, title)
+        scores[textage_id] = score
+    # We only care about ties for the lowest score
+    # so we sort to get the elements in ascending score order
+    sorted_scores = {t: scores[t] for t in sorted(scores, key=scores.get)}  # type: ignore
+    for textage_id, score in sorted_scores.items():
+        if lowest_score != -1 and score == lowest_score:
+            lowest_has_tie = True
+        if lowest_score == -1 or score < lowest_score:
+            lowest_textage_id = textage_id
+            lowest_score = score
+    if lowest_has_tie or lowest_textage_id is None:
+        raise RuntimeError(
+            "Couldn't figure out song title from OCR data and metadata. "
+            f"song metadata: {metadata_titles} "
+            f"ocr data: {ocr_titles} "
+            f"similarity scores: {sorted_scores} "
+        )
+    return lowest_textage_id
 
 
 def fast_slow_digit_reader(block: NDArray) -> str:
@@ -518,5 +549,4 @@ def get_note_count(frame: NDArray) -> int:
             else:
                 log.debug("DEFINITELY 6")
                 digits_sum += magnitude * 6
-
     return digits_sum
