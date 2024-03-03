@@ -6,6 +6,10 @@ from datetime import datetime
 from dataclasses import asdict
 from . import constants as CONSTANTS
 from .download_textage_tables import get_infinitas_song_metadata
+from .download_kamaitachi_metadata import (
+    download_kamaitachi_song_list,
+    normalize_textage_to_kamaitachi,
+)
 from .local_dataclasses import SongReference
 
 log = logging.getLogger(__name__)
@@ -126,6 +130,16 @@ def create_app_database():
         "alternate_difficulty text,"
         "alternate_level text)"
     )
+    create_third_party_id_table = (
+        "create table if not exists third_party_song_ids("
+        "textage_id text,"
+        "third_party_name text,"
+        "third_party_id text)"
+    )
+    create_third_party_id_table_index = (
+        "create unique index if not exists third_party_id_index "
+        "on third_party_song_ids(textage_id, third_party_name, third_party_id)"
+    )
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     db_cursor = app_db_connection.cursor()
     db_cursor.execute(create_song_table_query)
@@ -133,6 +147,8 @@ def create_app_database():
     db_cursor.execute(create_song_difficulty_table_query)
     db_cursor.execute(create_song_difficulty_index_query)
     db_cursor.execute(create_alternate_song_difficulty_table_query)
+    db_cursor.execute(create_third_party_id_table)
+    db_cursor.execute(create_third_party_id_table_index)
 
 
 def should_update_app_db() -> bool:
@@ -184,6 +200,11 @@ def populate_song_metadata_into_db():
         "version"
         ") values (?,?,?,?,?,?)"
     )
+    kamaitachi_third_party_insert_query = (
+        "insert or replace into third_party_song_ids ("
+        "textage_id, third_party_name, third_party_id"
+        ") values (?,?,?)"
+    )
     for textage_id, song in song_metadata.items():
         app_db_cursor.execute(
             song_insert_query,
@@ -211,6 +232,15 @@ def populate_song_metadata_into_db():
                 ),
             )
         app_db_connection.commit()
+    song_reference = read_song_data_from_db()
+    mapping = normalize_textage_to_kamaitachi(
+        song_reference, download_kamaitachi_song_list()
+    )
+    for textage_id, kt_id in mapping.items():
+        app_db_cursor.execute(
+            kamaitachi_third_party_insert_query, (textage_id, "kamaitachi", kt_id)
+        )
+    app_db_connection.commit()
 
 
 def read_song_data_from_db() -> SongReference:

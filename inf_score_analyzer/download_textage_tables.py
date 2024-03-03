@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import json
+import html
 import logging
 from pathlib import Path
 from datetime import datetime
@@ -15,6 +16,7 @@ from .local_dataclasses import (
     Alphanumeric,
     DifficultyMetadata,
 )
+from . import constants as CONSTANTS
 
 log = logging.getLogger(__name__)
 
@@ -200,8 +202,7 @@ def read_notes_and_bpm() -> Tuple[
 
 
 def _get_textage_metadata_path() -> Path:
-    script_path = Path(os.path.dirname(os.path.realpath(sys.argv[0])))
-    textage_metadata_path = script_path / Path(".textage-metadata")
+    textage_metadata_path = CONSTANTS.DATA_DIR / Path("textage-metadata")
     return textage_metadata_path
 
 
@@ -296,7 +297,12 @@ def get_textage_song_titles() -> Dict[str, Any]:
         values = re.sub(r"<\\/b>", "", values)
         values = re.sub(r"^\[SS", "[-1", values)
         values = re.sub(r"\t", "", values)
+        values = re.sub('"\s+', '"', values)
+        values = re.sub('\s+"', '"', values)
         key = re.sub("'", '"', key)
+        # convert shiftjis-to-ascii-to-utf8
+        if re.match(r".*&[#A-Za-z0-9]+;.*", values):
+            values = html.unescape(values)
         return f"{key}:{values}\n"
 
     return _check_textage_metadata_files(
