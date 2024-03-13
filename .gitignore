@@ -1,4 +1,5 @@
 **/.textage-metadata/
+**/textage-metadata/
 **.swp
 **.db
 *.DS_Store
@@ -11,6 +12,7 @@ data/play_frames/
 data/raw_frames/
 data/score_frames/
 data/png-dumps/
+data/kamaitachi-iidx-songs.json
 # C extensions
 *.so
 

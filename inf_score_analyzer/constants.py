@@ -53,3 +53,6 @@ USER_DB_NAME = "user.sqlite3.db"
 APP_DB = DATA_DIR / Path(APP_DB_NAME)
 USER_DB = DATA_DIR / Path(USER_DB_NAME)
 MIN_APP_AGE_UPDATE_SECONDS = 43200
+TACHI_API_TOKEN = os.getenv("TACHI_API_TOKEN", "")
+
+KAMAITACHI_SONG_LIST_URL = "https://raw.githubusercontent.com/TNG-dev/Tachi/release/2.5/database-seeds/collections/songs-iidx.json"

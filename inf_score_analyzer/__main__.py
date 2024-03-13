@@ -30,6 +30,7 @@ from .play_frame_processor import (
 )
 from . import score_frame_processor as result_processor
 from .game_state_frame_processor import get_game_state_from_frame
+from .kamaitachi_export import export_to_kamaitachi
 
 
 def __loop(
@@ -204,6 +205,7 @@ def end_session(session_uuid: str) -> None:
     db_cursor = user_db_connection.cursor()
     db_cursor.execute(session_end_query, (session_end_time_utc, session_uuid))
     user_db_connection.commit()
+    export_to_kamaitachi(session_uuid)
 
 
 def start_session():
