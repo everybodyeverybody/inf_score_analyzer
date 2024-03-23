@@ -60,6 +60,8 @@ def normalize_textage_to_kamaitachi(
         "Raspberry♥Heart (English version)": "499",
         # the schwa is not an exact codepoint match
         "uәn": "2271",
+        # new unique character! need to fix the encoding here
+        "ジオメトリック�塔eィーパーティー": "2352",
     }
 
     kamaitachi_titles = {}
@@ -94,6 +96,9 @@ def normalize_textage_to_kamaitachi(
         entry_full_width_punctuation_no_spaces = re.sub(
             r"\s+", "", entry_full_width_punctuation
         )
+        if textage_id == "_geo_tea":
+            kamaitachi = "ジオメトリック∮ティーパーティー"
+            pass
         if entry in kamaitachi_titles:
             mapping[textage_id] = kamaitachi_titles[entry]
             continue

@@ -8,11 +8,19 @@ from numpy.typing import NDArray
 
 # local imports
 from . import constants as CONSTANTS
-from .local_dataclasses import StatePixel
+from .local_dataclasses import GameState, GameStatePixel
 from .color_presets import BGR_WHITE, BGR_BLACK
 from .frame_utilities import check_pixel_color_in_frame
 
 log = logging.getLogger(__name__)
+
+
+
+def read_state_pixels() -> List[StatePixel]:
+    log.info(f"Reading pixel config from {CONSTANTS.STATE_PIXEL_CONFIG_FILE}")
+    with open(CONSTANTS.STATE_PIXEL_CONFIG_FILE, "rt") as state_pixel_reader:
+        pixel_config_json = json.load(state_pixel_reader)
+        return [StatePixel(**entry) for entry in pixel_config_json]
 
 
 def get_game_state_from_frame(frame: NDArray, magic_pixels: List[StatePixel]) -> str:
@@ -30,7 +38,6 @@ def get_game_state_from_frame(frame: NDArray, magic_pixels: List[StatePixel]) ->
         if state_pixel.state not in active_states:
             active_states[state_pixel.state] = set()
         log.debug(f"{state_pixel} {does_color_match}")
-        # print(f"{state_pixel} {does_color_match}")
         active_states[state_pixel.state].add(does_color_match)
     screen_is_white = white_screen_state_pixels == CONSTANTS.ALL_TRUE
     screen_is_black = black_screen_state_pixels == CONSTANTS.ALL_TRUE
