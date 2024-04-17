@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 def submit_score_request(scores: Dict[str, Any]) -> None:
-    url = "https://kamaitachi.xyz/ir/direct-manual/import"
+    url = "https://kamai.tachi.ac/ir/direct-manual/import"
     headers = {"Authorization": f"Bearer {CONSTANTS.TACHI_API_TOKEN}"}
     response = requests.post(url, headers=headers, json=scores)
     if response.status_code in [200, 202]:
@@ -59,7 +59,7 @@ def get_scores_by_session(session_id: str) -> List[Tuple]:
         "join songs songs on songs.textage_id=score.textage_id "
         "join difficulty on difficulty.difficulty_id=score.difficulty_id "
         "join third_party_song_ids on third_party_song_ids.textage_id=songs.textage_id and third_party_song_ids.third_party_name='kamaitachi' "
-        "where session.session_uuid=?;"
+        "where session.session_uuid=? and clear_type!='';"
     )
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     db_cursor = app_db_connection.cursor()

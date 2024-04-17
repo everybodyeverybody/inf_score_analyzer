@@ -10,8 +10,9 @@ from .frame_utilities import (
     is_black,
     read_pixel,
     dump_to_png,
+    get_numbers_from_area,
 )
-from .local_dataclasses import Point, OCRSongTitles, VideoProcessingState
+from .local_dataclasses import Point, OCRSongTitles, VideoProcessingState, PlayMetadata
 from . import constants as CONSTANTS
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,6 @@ log = logging.getLogger(__name__)
 
 
 def lifebar_digit_reader(block: NDArray) -> str:
-    log.debug("\n" + get_array_as_ascii_art(block))
     top_mid = Point(y=1, x=12)
     mid_top = Point(y=7, x=12)
     mid1 = Point(y=8, x=12)
@@ -47,19 +47,19 @@ def lifebar_digit_reader(block: NDArray) -> str:
     mid2 = Point(y=9, x=12)
     bottom_left = Point(y=15, x=2)
     top_right = Point(y=2, x=21)
-    if is_white(read_pixel(block, mid1)):
+    if is_white(block, mid1):
         log.debug("MIGHT BE 123568")
-        if is_white(read_pixel(block, mid_top)):
+        if is_white(block, mid_top):
             log.debug("MIGHT BE 1568")
-            if is_white(read_pixel(block, top_right)):
+            if is_white(block, top_right):
                 log.debug("MIGHT BE 58")
-                if is_white(read_pixel(block, mid_left)):
+                if is_white(block, mid_left):
                     log.debug("DEFINITELY 8")
                     return "8"
                 else:
                     log.debug("DEFINITELY 5")
                     return "5"
-            elif is_white(read_pixel(block, mid_left)):
+            elif is_white(block, mid_left):
                 log.debug("DEFINITELY 6")
                 return "6"
             else:
@@ -67,7 +67,7 @@ def lifebar_digit_reader(block: NDArray) -> str:
                 return "1"
         else:
             log.debug("MIGHT BE 23")
-            if is_white(read_pixel(block, mid_left)):
+            if is_white(block, mid_left):
                 log.debug("DEFINITELY 2")
                 return "2"
             else:
@@ -75,9 +75,9 @@ def lifebar_digit_reader(block: NDArray) -> str:
                 return "3"
     else:
         log.debug("MIGHT BE 0479_")
-        if is_white(read_pixel(block, mid2)):
+        if is_white(block, mid2):
             log.debug("MIGHT BE 49")
-            if is_white(read_pixel(block, top_mid)):
+            if is_white(block, top_mid):
                 log.debug("DEFINITELY 9")
                 return "9"
             else:
@@ -85,10 +85,10 @@ def lifebar_digit_reader(block: NDArray) -> str:
                 return "4"
         else:
             log.debug("MIGHT BE 07_")
-            if is_white(read_pixel(block, bottom_left)):
+            if is_white(block, bottom_left):
                 log.debug("DEFINITELY 0")
                 return "0"
-            elif is_white(read_pixel(block, top_mid)):
+            elif is_white(block, top_mid):
                 log.debug("DEFINITELY 7")
                 return "7"
             else:
@@ -142,6 +142,76 @@ def get_lifebar_percentage(frame: NDArray, left_side: bool, is_double: bool) -> 
         percentage_area_origin,
         CONSTANTS.PERCENTAGE_DIGIT_X_OFFSET,
         CONSTANTS.PERCENTAGE_DIGIT_Y_OFFSET,
+    )
+
+
+def hd_get_ocr_song_title_from_play_frame(
+    frame: NDArray, left_side: bool, is_double: bool
+) -> OCRSongTitles:
+    #    if not is_double:
+    #        top_left_y = 36
+    #        top_left_x = 350
+    #        song_title_bottom_right_y = 63
+    #        artist_bottom_right_y = 90
+    #        bottom_right_x = 1000
+    #    elif left_side:
+    #        top_left_y = 30
+    #        top_left_x = 0
+    #        song_title_bottom_right_y = 62
+    #        artist_bottom_right_y = 87
+    #        bottom_right_x = 260
+    #    else:
+    #        top_left_y = 30
+    #        top_left_x = 1020
+    #        bottom_right_x = 1279
+    #        song_title_bottom_right_y = 62
+    #        artist_bottom_right_y = 87
+    if left_side and not is_double:
+        top_left_y = 60
+        top_left_x = 734
+        bottom_right_x = 1500
+        song_title_bottom_right_y = 96
+        artist_bottom_right_y = 120
+    else:
+        raise RuntimeError("2p and dp not yet supported")
+    grey_r = 145
+    grey_g = 145
+    grey_b = 145
+    for y in range(top_left_y, artist_bottom_right_y):
+        for x in range(top_left_x, bottom_right_x):
+            if (
+                frame[y][x][0] < grey_b
+                and frame[y][x][1] < grey_g
+                and frame[y][x][2] < grey_r
+            ):
+                frame[y][x][0] = 255
+                frame[y][x][1] = 255
+                frame[y][x][2] = 255
+            else:
+                frame[y][x][0] = 0
+                frame[y][x][1] = 0
+                frame[y][x][2] = 0
+    song_frame_slice = get_rectanglular_subsection_from_frame(
+        frame, top_left_y, top_left_x, song_title_bottom_right_y, bottom_right_x
+    )
+    artist_frame_slice = get_rectanglular_subsection_from_frame(
+        frame,
+        song_title_bottom_right_y,
+        top_left_x,
+        artist_bottom_right_y,
+        bottom_right_x,
+    )
+    # TODO: wrap in debug
+    # dump_to_png(song_frame_slice, "SONG_TITLE", 0)
+    # dump_to_png(artist_frame_slice, "SONG_ARTIST", 0)
+    en_song = str.strip(pytesseract.image_to_string(song_frame_slice, lang="eng"))
+    jp_song = str.strip(pytesseract.image_to_string(song_frame_slice, lang="jpn"))
+    en_artist = str.strip(pytesseract.image_to_string(artist_frame_slice, lang="eng"))
+    jp_artist = str.strip(pytesseract.image_to_string(artist_frame_slice, lang="jpn"))
+    log.info(f"ENG SONG: {en_artist} {en_song} ")
+    log.info(f"JPN SONG: {jp_artist} {jp_song}")
+    return OCRSongTitles(
+        en_title=en_song, en_artist=en_artist, jp_title=jp_song, jp_artist=jp_artist
     )
 
 
@@ -204,6 +274,74 @@ def get_ocr_song_title_from_play_frame(
     )
 
 
+def hd_play_level_digit_reader(block: NDArray) -> int:
+    left_most_column = Point(x=4, y=5)
+    bottom_right_gap = Point(x=25, y=12)
+    bottom_left_gap = Point(x=6, y=12)
+    top_right_gap = Point(x=25, y=6)
+    top_center_gap = Point(x=16, y=4)
+    second_digit_middle = Point(x=20, y=8)
+    bottom_left_corner = Point(x=6, y=15)
+    if is_white(block, left_most_column):
+        log.debug("MIGHT BE 6 9 10 11 12")
+        if is_white(block, bottom_right_gap):
+            if not is_white(block, bottom_left_gap):
+                log.debug("DEFINITELY 9")
+                return 9
+            elif is_white(block, top_right_gap):
+                log.debug("DEFINITELY 11")
+                return 11
+            else:
+                log.debug("DEFINITELY 6")
+                return 6
+        else:
+            log.debug("MIGHT BE 10 12")
+            if is_white(block, second_digit_middle):
+                log.debug("DEFINITELY 12")
+                return 12
+            else:
+                log.debug("DEFINITELY 10")
+                return 10
+    elif is_white(block, bottom_right_gap):
+        log.debug("MIGHT BE 3 4 5 8")
+        if is_white(block, bottom_left_corner):
+            log.debug("MIGHT BE 3 5")
+            if is_white(block, top_right_gap):
+                log.debug("DEFINITELY 3")
+                return 3
+            else:
+                log.debug("DEFINITELY 5")
+                return 5
+        else:
+            log.debug("MIGHT BE 4 8")
+            if is_white(block, top_center_gap):
+                log.debug("DEFINITELY 4")
+                return 4
+            else:
+                log.debug("DEFINITELY 8")
+                return 8
+    else:
+        if is_white(block, top_center_gap):
+            log.debug("DEFINITELY 1")
+            return 1
+        elif is_white(block, bottom_left_corner):
+            log.debug("DEFINITELY 2")
+            return 2
+        else:
+            log.debug("DEFINITELY 7")
+            return 7
+
+
+def hd_read_play_level(frame: NDArray, left_side: bool, is_double: bool) -> int:
+    if is_double:
+        raise RuntimeError("double not yet supported")
+    elif left_side:
+        level_area = CONSTANTS.LEVEL_SP_P1
+    else:
+        level_area = CONSTANTS.LEVEL_SP_P2
+    return get_numbers_from_area(frame, level_area, hd_play_level_digit_reader)[0]
+
+
 def read_play_level(play_frame: NDArray, left_side: bool, is_double: bool) -> int:
     if left_side and not is_double:
         origin = Point(y=107, x=425)
@@ -219,11 +357,11 @@ def read_play_level(play_frame: NDArray, left_side: bool, is_double: bool) -> in
     top_right = Point(y=origin.y + 3, x=origin.x + 20)
     bottom_left = Point(y=origin.y + 7, x=origin.x + 7)
     bottom_right = Point(y=origin.y + 8, x=origin.x + 20)
-    if is_white(read_pixel(play_frame, at_least_ten)):
+    if is_white(play_frame, at_least_ten):
         log.debug("prob 10 11 12")
-        if not is_white(read_pixel(play_frame, bottom_left)):
+        if not is_white(play_frame, bottom_left):
             log.debug("prob 11 12")
-            if is_white(read_pixel(play_frame, bottom_right)):
+            if is_white(play_frame, bottom_right):
                 log.debug("def 11")
                 return 11
             else:
@@ -232,11 +370,11 @@ def read_play_level(play_frame: NDArray, left_side: bool, is_double: bool) -> in
         else:
             log.debug("definitely 10")
             return 10
-    elif is_white(read_pixel(play_frame, top_left_2)):
+    elif is_white(play_frame, top_left_2):
         log.debug("prob 5 6 8 9")
-        if is_white(read_pixel(play_frame, top_right)):
+        if is_white(play_frame, top_right):
             log.debug("prob 8 9")
-            if is_white(read_pixel(play_frame, bottom_left)):
+            if is_white(play_frame, bottom_left):
                 log.debug("def 8")
                 return 8
             else:
@@ -244,7 +382,7 @@ def read_play_level(play_frame: NDArray, left_side: bool, is_double: bool) -> in
                 return 9
         else:
             log.debug("prob 5 6")
-            if is_white(read_pixel(play_frame, bottom_left)):
+            if is_white(play_frame, bottom_left):
                 log.debug("def 6")
                 return 6
             else:
@@ -252,12 +390,12 @@ def read_play_level(play_frame: NDArray, left_side: bool, is_double: bool) -> in
                 return 5
     else:
         log.debug("prob 1 2 3 4 7")
-        if is_white(read_pixel(play_frame, top_left_1)):
+        if is_white(play_frame, top_left_1):
             log.debug("prob 2 3 7")
-            if is_white(read_pixel(play_frame, bottom_left)):
+            if is_white(play_frame, bottom_left):
                 log.debug("def 2")
                 return 2
-            elif is_white(read_pixel(play_frame, bottom_right)):
+            elif is_white(play_frame, bottom_right):
                 log.debug("def 3")
                 return 3
             else:
@@ -265,12 +403,16 @@ def read_play_level(play_frame: NDArray, left_side: bool, is_double: bool) -> in
                 return 7
         else:
             log.debug("prob 1 4")
-            if is_white(read_pixel(play_frame, top_right)):
+            if is_white(play_frame, top_right):
                 log.debug("def 4")
                 return 4
             else:
                 log.debug("def 1")
                 return 1
+
+
+def hd_read_side_and_doubles(play_frame: NDArray) -> Tuple[bool, bool]:
+    return True, False
 
 
 def read_side_and_doubles(play_frame: NDArray) -> Tuple[bool, bool]:
@@ -324,6 +466,35 @@ def read_side_and_doubles(play_frame: NDArray) -> Tuple[bool, bool]:
         log.error(f"dp right color: {dp_right_color}")
         raise RuntimeError("Could not read single doubles")
     return left_side, is_double
+
+
+def hd_read_play_difficulty(frame: NDArray, left_side: bool, is_double) -> str:
+    single_or_double = "SP"
+    if is_double:
+        raise RuntimeError("double not yet supported")
+    if left_side:
+        difficulty_point = Point(x=580, y=75)
+    else:
+        difficulty_point = Point(x=1208, y=75)
+    color = read_pixel(frame, difficulty_point)
+    # normal = [215, 132, 0]
+    # hyper = [0, 157, 215]
+    # another = [0, 0, 215]
+    # leggendaria = [215, 0, 163]
+    known_difficulty = "UNKNOWN"
+    if color[0] < 10:
+        if color[1] >= 128:
+            known_difficulty = "HYPER"
+        else:
+            known_difficulty = "ANOTHER"
+    else:
+        if color[1] >= 128:
+            known_difficulty = "NORMAL"
+        else:
+            known_difficulty = "LEGGENDARIA"
+    log.debug(f"difficulty color {color}")
+    log.debug(f"difficulty {known_difficulty}")
+    return f"{single_or_double}_{known_difficulty}"
 
 
 def read_play_difficulty(play_frame: NDArray, left_side: bool, is_double: bool) -> str:
@@ -383,6 +554,14 @@ def read_play_difficulty(play_frame: NDArray, left_side: bool, is_double: bool) 
         return f"{single_or_double}_{difficulty}"
 
 
+def hd_read_play_lifebar_type(
+    play_frame: NDArray, left_side: bool, is_double: bool
+) -> str:
+    if CONSTANTS.DEV_MODE:
+        dump_to_png(play_frame, "play_lifebar", 1100)
+    return "UNKNOWN"
+
+
 def read_play_lifebar_type(
     play_frame: NDArray, left_side: bool, is_double: bool
 ) -> str:
@@ -409,7 +588,6 @@ def read_play_lifebar_type(
 
 
 def min_max_bpm_digit_reader(block: NDArray) -> int:
-    log.debug("\n" + get_array_as_ascii_art(block, use_black=True))
     lower_right = Point(y=9, x=14)
     lower_left = Point(y=9, x=2)
     lower_left_floor = Point(y=12, x=4)
@@ -525,7 +703,7 @@ def read_max_bpm_area(
 
 
 def current_bpm_digit_reader(block: NDArray) -> int:
-    log.debug("\n" + get_array_as_ascii_art(block))
+    # log.debug("\n" + get_array_as_ascii_art(block))
     top_mid = Point(y=1, x=12)
     mid1 = Point(y=7, x=12)
     mid_left = Point(y=9, x=2)
@@ -534,14 +712,14 @@ def current_bpm_digit_reader(block: NDArray) -> int:
     bottom_left_floor = Point(y=15, x=4)
     bottom_left_leg = Point(y=12, x=4)
     top_right = Point(y=3, x=22)
-    if is_white(read_pixel(block, mid1)):
+    if is_white(block, mid1):
         log.debug("MIGHT BE 123568")
-        if is_white(read_pixel(block, mid_right_curve)):
+        if is_white(block, mid_right_curve):
             log.debug("MIGHT BE 568")
-            if is_white(read_pixel(block, top_right)):
+            if is_white(block, top_right):
                 log.debug("DEFINITELY 8")
                 return 8
-            elif is_white(read_pixel(block, bottom_left_leg)):
+            elif is_white(block, bottom_left_leg):
                 log.debug("DEFINITELY 6")
                 return 6
             else:
@@ -549,10 +727,10 @@ def current_bpm_digit_reader(block: NDArray) -> int:
                 return 5
         else:
             log.debug("MIGHT BE 123")
-            if is_white(read_pixel(block, mid_left)):
+            if is_white(block, mid_left):
                 log.debug("DEFINITELY 2")
                 return 2
-            elif is_white(read_pixel(block, bottom_left_floor)):
+            elif is_white(block, bottom_left_floor):
                 log.debug("DEFINITELY 3")
                 return 3
             else:
@@ -560,9 +738,9 @@ def current_bpm_digit_reader(block: NDArray) -> int:
                 return 1
     else:
         log.debug("MIGHT BE 0479_")
-        if is_white(read_pixel(block, mid2)):
+        if is_white(block, mid2):
             log.debug("MIGHT BE 49")
-            if is_white(read_pixel(block, top_mid)):
+            if is_white(block, top_mid):
                 log.debug("DEFINITELY 9")
                 return 9
             else:
@@ -570,10 +748,10 @@ def current_bpm_digit_reader(block: NDArray) -> int:
                 return 4
         else:
             log.debug("MIGHT BE 07_")
-            if is_white(read_pixel(block, bottom_left_floor)):
+            if is_white(block, bottom_left_floor):
                 log.debug("DEFINITELY 0")
                 return 0
-            elif is_white(read_pixel(block, top_mid)):
+            elif is_white(block, top_mid):
                 log.debug("DEFINITELY 7")
                 return 7
             else:
@@ -581,81 +759,174 @@ def current_bpm_digit_reader(block: NDArray) -> int:
                 return 0
 
 
-def read_current_bpm_area(
-    frame: NDArray, place_index: int, left_side: bool, is_double: bool
-) -> int:
-    if is_double:
-        bpm_area_x_origin = CONSTANTS.BPM_DP_AREA_X_ORIGIN
-        bpm_area_y_origin = CONSTANTS.BPM_DP_AREA_Y_ORIGIN
-    elif left_side:
-        bpm_area_x_origin = CONSTANTS.BPM_SP_P1_AREA_X_ORIGIN
-        bpm_area_y_origin = CONSTANTS.BPM_SP_P1_AREA_Y_ORIGIN
+def hd_current_bpm_digit_reader(block: NDArray) -> int:
+    center_line_middle = Point(x=15, y=10)
+    center_line_top = Point(x=15, y=8)
+    center_line_bottom = Point(x=15, y=12)
+    top_left_gap = Point(x=4, y=5)
+    top_line_middle = Point(x=15, y=1)
+    top_right_gap = Point(x=28, y=5)
+    bottom_right_gap = Point(x=28, y=15)
+    bottom_left_gap = Point(x=4, y=15)
+    if is_white(block, center_line_middle):
+        log.debug("MIGHT BE 1238")
+        if not is_white(block, top_right_gap):
+            log.debug("DEFINITELY 1")
+            return 1
+        else:
+            log.debug("MIGHT BE 238")
+            if not is_white(block, bottom_right_gap):
+                log.debug("DEFINITELY 2")
+                return 2
+            elif is_white(block, top_left_gap):
+                log.debug("DEFINITELY 8")
+                return 8
+            else:
+                log.debug("DEFINITELY 3")
+                return 3
     else:
-        bpm_area_x_origin = CONSTANTS.BPM_SP_P2_AREA_X_ORIGIN
-        bpm_area_y_origin = CONSTANTS.BPM_SP_P2_AREA_Y_ORIGIN
-    column_offset = place_index * CONSTANTS.BPM_DIGIT_X_OFFSET
-    top_left_x_with_offset = bpm_area_x_origin + column_offset
-    bottom_right_x_with_offset = top_left_x_with_offset + CONSTANTS.BPM_DIGIT_X_OFFSET
-    top_left = Point(y=bpm_area_y_origin, x=top_left_x_with_offset)
-    bottom_right = Point(
-        y=bpm_area_y_origin + CONSTANTS.BPM_DIGIT_Y_OFFSET,
-        x=bottom_right_x_with_offset,
-    )
-    log.debug(f"TOP LEFT {top_left} BOTTOM_RIGHT {bottom_right}")
-    digit_block = get_rectanglular_subsection_from_frame(
-        frame, top_left.y, top_left.x, bottom_right.y, bottom_right.x
-    )
-    return current_bpm_digit_reader(digit_block)
+        log.debug("MIGHT BE _045679")
+        if is_white(block, top_right_gap):
+            log.debug("MIGHT BE 0479")
+            if is_white(block, center_line_bottom):
+                log.debug("MIGHT BE 49")
+                if is_white(block, top_line_middle):
+                    log.debug("DEFINITELY 9")
+                    return 9
+                else:
+                    log.debug("DEFINITELY 4")
+                    return 4
+            else:
+                log.debug("MIGHT BE 07")
+                if is_white(block, bottom_left_gap):
+                    log.debug("DEFINITELY 0")
+                    return 0
+                else:
+                    log.debug("DEFINITELY 7")
+                    return 7
+        else:
+            log.debug("MIGHT BE _56")
+            if not is_white(block, center_line_top):
+                log.debug("DEFINITELY ' '")
+                return 0
+            elif is_white(block, bottom_left_gap):
+                log.debug("DEFINITELY 6")
+                return 6
+            else:
+                log.debug("DEFINITELY 5")
+                return 5
 
 
-def read_bpm(frame: NDArray, left_side: bool, is_double: bool) -> Tuple[int, int]:
-    places_count = 3
+def hd_min_max_bpm_digit_reader(block: NDArray) -> int:
+    center_line_top = Point(x=12, y=6)
+    center_line_bottom = Point(x=12, y=8)
+    top_left_gap = Point(x=2, y=3)
+    top_right_gap = Point(x=19, y=3)
+    bottom_right_gap = Point(x=19, y=9)
+    bottom_left_gap = Point(x=2, y=9)
+    bottom_line_center = Point(y=13, x=6)
+    if is_white(block, center_line_top):
+        log.debug("MIGHT BE 123568")
+        if is_white(block, top_left_gap):
+            log.debug("MIGHT BE 568")
+            if is_white(block, top_right_gap):
+                log.debug("DEFINITELY 8")
+                return 8
+            elif is_white(block, bottom_left_gap):
+                log.debug("DEFINITELY 6")
+                return 6
+            else:
+                log.debug("DEFINITELY 5")
+                return 5
+        else:
+            log.debug("MIGHT BE 123")
+            if not is_white(block, top_right_gap):
+                log.debug("DEFINITELY 1")
+                return 1
+            elif is_white(block, bottom_right_gap):
+                log.debug("DEFINITELY 3")
+                return 3
+            else:
+                log.debug("DEFINITELY 2")
+                return 2
+    else:
+        log.debug("MIGHT BE _0479")
+        if not is_white(block, bottom_right_gap):
+            log.debug("DEFINITELY ' '")
+            return 0
+        elif is_white(block, bottom_line_center):
+            log.debug("MIGHT BE 09")
+            if is_white(block, center_line_bottom):
+                log.debug("DEFINITELY 9")
+                return 9
+            else:
+                log.debug("DEFINITELY 0")
+                return 0
+        else:
+            log.debug("MIGHT BE 47")
+            if is_white(block, center_line_bottom):
+                log.debug("DEFINITELY 4")
+                return 4
+            else:
+                log.debug("DEFINITELY 7")
+                return 7
+
+
+def hd_read_bpm(frame: NDArray, left_side: bool, is_double: bool) -> Tuple[int, int]:
+    if is_double:
+        raise RuntimeError("doubles is not yet implemented")
+    elif left_side:
+        cur_bpm_area = CONSTANTS.BPM_P1_AREA
+        min_bpm_area = CONSTANTS.MIN_BPM_P1_AREA
+        max_bpm_area = CONSTANTS.MAX_BPM_P1_AREA
+    else:
+        cur_bpm_area = CONSTANTS.BPM_P2_AREA
+        min_bpm_area = CONSTANTS.MIN_BPM_P2_AREA
+        max_bpm_area = CONSTANTS.MAX_BPM_P2_AREA
     cur_bpm = 0
     min_bpm = 0
     max_bpm = 0
-    for place in range(0, places_count):
-        exponent = (places_count - 1) - place
-        tens_place = 10**exponent
-        cur_bpm += tens_place * read_current_bpm_area(
-            frame, place, left_side, is_double
-        )
-        min_bpm += tens_place * read_min_bpm_area(frame, place, left_side, is_double)
-        max_bpm += tens_place * read_max_bpm_area(frame, place, left_side, is_double)
+    cur_bpm = get_numbers_from_area(frame, cur_bpm_area, hd_current_bpm_digit_reader)[0]
+    min_bpm = get_numbers_from_area(frame, min_bpm_area, hd_min_max_bpm_digit_reader)[0]
+    max_bpm = get_numbers_from_area(frame, max_bpm_area, hd_min_max_bpm_digit_reader)[0]
     if not min_bpm and not max_bpm:
         min_bpm = cur_bpm
         max_bpm = cur_bpm
+    log.debug(f"cur bpm: {cur_bpm}")
     return min_bpm, max_bpm
 
 
-def read_play_metadata(
+def hd_read_play_metadata(
     play_frame_count: int,
     play_frame: NDArray,
     video_processing_state: VideoProcessingState,
-) -> Tuple[str, int, str, int, int, bool, bool]:
-
+) -> PlayMetadata:
     if (
         video_processing_state.left_side is None
         or video_processing_state.is_double is None
     ):
-        left_side, is_double = read_side_and_doubles(play_frame)
+        # left_side, is_double = read_side_and_doubles(play_frame)
+        left_side, is_double = hd_read_side_and_doubles(play_frame)
     else:
         left_side = video_processing_state.left_side
         is_double = video_processing_state.is_double
     if video_processing_state.difficulty is None:
-        difficulty = read_play_difficulty(play_frame, left_side, is_double)
+        difficulty = hd_read_play_difficulty(play_frame, left_side, is_double)
     else:
         difficulty = video_processing_state.difficulty
     if video_processing_state.level is None:
-        level = read_play_level(play_frame, left_side, is_double)
+        level = hd_read_play_level(play_frame, left_side, is_double)
     else:
         level = video_processing_state.level
     if video_processing_state.lifebar_type is None:
-        lifebar_type = read_play_lifebar_type(play_frame, left_side, is_double)
+        lifebar_type = hd_read_play_lifebar_type(play_frame, left_side, is_double)
     else:
-        lifebar_type = video_processing_state.difficulty
+        lifebar_type = video_processing_state.lifebar_type
     if video_processing_state.min_bpm is None or video_processing_state.max_bpm is None:
-        min_bpm, max_bpm = read_bpm(play_frame, left_side, is_double)
+        min_bpm, max_bpm = hd_read_bpm(play_frame, left_side, is_double)
     else:
         min_bpm = video_processing_state.min_bpm
         max_bpm = video_processing_state.max_bpm
-    return difficulty, level, lifebar_type, min_bpm, max_bpm, left_side, is_double
+    return PlayMetadata(
+        difficulty, level, lifebar_type, min_bpm, max_bpm, left_side, is_double
+    )

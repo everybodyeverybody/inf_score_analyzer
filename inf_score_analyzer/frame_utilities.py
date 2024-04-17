@@ -2,27 +2,22 @@
 import os
 import logging
 from pathlib import Path
-from typing import Optional
 from datetime import datetime
+from typing import Optional, Callable
 
 import numpy
 import cv2 as cv  # type: ignore
 from numpy.typing import NDArray
-
+from .local_dataclasses import NumberArea
 from .constants import (
     QUANTIZED_WHITE_MAX,
     QUANTIZED_BLACK_MIN,
     BRIGHTNESS_HALFWAY_POINT,
     DATA_DIR,
 )
-from .local_dataclasses import StatePixel, Point
+from .local_dataclasses import GameStatePixel, Point
 
 log = logging.getLogger(__name__)
-
-
-def read_pixel(block: NDArray, point: Point) -> list:
-    log.debug(f"{point} {block[point.y][point.x][0:3]}")
-    return block[point.y][point.x][0:3]
 
 
 def dump_to_ndarray_zip_file(frame: NDArray, label: str, frame_id: int) -> Path:
@@ -86,14 +81,6 @@ def get_rectanglular_subsection_from_frame(
     return frame[top_left_y:bottom_right_y, top_left_x:bottom_right_x]
 
 
-def verify_image_size(result_screen: NDArray) -> bool:
-    y, x, dimensions = result_screen.shape
-    log.debug(f"image size {x}x{y}")
-    if y != 720 or x != 1280:
-        return False
-    return True
-
-
 def get_array_as_ascii_art(block: NDArray, use_black: bool = False) -> str:
     output_string = ""
     rows = None
@@ -110,12 +97,12 @@ def get_array_as_ascii_art(block: NDArray, use_black: bool = False) -> str:
             if x_index == 0:
                 output_string += rows[y_index]
             if not use_black:
-                if is_white(x[0:3]):
+                if is_white_pixel(x[0:3]):
                     output_string += "X"
                 else:
                     output_string += "_"
             else:
-                if not is_black(x[0:3]):
+                if not is_black_pixel(x[0:3]):
                     output_string += "X"
                 else:
                     output_string += "_"
@@ -123,7 +110,13 @@ def get_array_as_ascii_art(block: NDArray, use_black: bool = False) -> str:
     return output_string
 
 
-def is_white(rgb_or_bgr: list) -> bool:
+def read_pixel(block: NDArray, point: Point) -> list:
+    # TODO: only run if debug logging is on
+    # log.debug(f"{point} {block[point.y][point.x][0:3]}")
+    return block[point.y][point.x][0:3]
+
+
+def is_white_pixel(rgb_or_bgr: list) -> bool:
     return (
         rgb_or_bgr[0] >= QUANTIZED_WHITE_MAX
         and rgb_or_bgr[1] >= QUANTIZED_WHITE_MAX
@@ -131,7 +124,11 @@ def is_white(rgb_or_bgr: list) -> bool:
     )
 
 
-def is_black(rgb_or_bgr: list) -> bool:
+def is_white(block: NDArray, point: Point) -> bool:
+    return is_white_pixel(read_pixel(block, point))
+
+
+def is_black_pixel(rgb_or_bgr: list) -> bool:
     return (
         rgb_or_bgr[0] <= QUANTIZED_BLACK_MIN
         and rgb_or_bgr[1] <= QUANTIZED_BLACK_MIN
@@ -139,17 +136,28 @@ def is_black(rgb_or_bgr: list) -> bool:
     )
 
 
-def is_bright(rgb_or_bgr: list) -> bool:
+def is_black(block: NDArray, point: Point) -> bool:
+    return is_black_pixel(read_pixel(block, point))
+
+
+def is_bright_pixel(rgb_or_bgr: list) -> bool:
     brightness_check = 0
+    log.debug(f"{rgb_or_bgr}")
     for value in rgb_or_bgr:
         if value >= BRIGHTNESS_HALFWAY_POINT:
+            log.debug(f"{value} >= {BRIGHTNESS_HALFWAY_POINT}")
             brightness_check += 1
+    log.debug(f"{brightness_check} >= 2")
     return brightness_check >= 2
+
+
+def is_bright(block: NDArray, point: Point) -> bool:
+    return is_bright_pixel(read_pixel(block, point))
 
 
 def check_pixel_color_in_frame(
     frame: NDArray,
-    pixel: StatePixel,
+    pixel: GameStatePixel,
     specific_color: Optional[tuple[int, int, int]] = None,
     tolerance: int = 15,
 ) -> bool:
@@ -181,3 +189,64 @@ def check_pixel_color_in_frame(
     else:
         result = False
     return result
+
+
+# def get_number_from_area(
+#    frame: NDArray,
+#    start_x: int,
+#    start_y: int,
+#    x_offset: int,
+#    y_offset: int,
+#    area_rows: int,
+#    row_digits: int,
+#    block_reader: Callable,
+# ) -> list[int]:
+#    area_numbers: list[int] = []
+#    for row in range(area_rows):
+#        number: int = 0
+#        row_start_y = start_y + (row * y_offset)
+#        for column_index in range(row_digits):
+#            place = 10 ** (row_digits - (column_index + 1))
+#            end_y = row_start_y + y_offset
+#            block_start_x = start_x + (x_offset * column_index)
+#            block_end_x = block_start_x + x_offset
+#            score_digit_block = get_rectanglular_subsection_from_frame(
+#                frame, row_start_y, block_start_x, end_y, block_end_x
+#            )
+#            if logging.getLogger().isEnabledFor(logging.DEBUG):
+#                log.debug("ASCII\n" + get_array_as_ascii_art(score_digit_block))
+#            read_number = block_reader(score_digit_block)
+#            number += read_number * place
+#        area_numbers.append(number)
+#    return area_numbers
+
+
+def get_numbers_from_area(
+    frame: NDArray,
+    area: NumberArea,
+    block_reader: Callable,
+) -> list[int]:
+    numbers: list[int] = []
+    log.debug(f"Using {area.name} for coordinates")
+    for row in range(area.rows):
+        number: int = 0
+        row_start_y = area.start_y + (row * area.y_offset)
+        for column_index in range(area.digits_per_row):
+            kerning_offset = 0
+            if area.kerning_offset:
+                kerning_offset = area.kerning_offset[column_index]
+            place = 10 ** (area.digits_per_row - (column_index + 1))
+            end_y = row_start_y + area.y_offset
+            block_start_x = (
+                area.start_x + (area.x_offset * column_index) + kerning_offset
+            )
+            block_end_x = block_start_x + area.x_offset
+            score_digit_block = get_rectanglular_subsection_from_frame(
+                frame, row_start_y, block_start_x, end_y, block_end_x
+            )
+            if logging.getLogger().isEnabledFor(logging.DEBUG):
+                log.debug("ASCII\n%s", get_array_as_ascii_art(score_digit_block))
+            read_number = block_reader(score_digit_block)
+            number += read_number * place
+        numbers.append(number)
+    return numbers

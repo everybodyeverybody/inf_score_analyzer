@@ -9,15 +9,39 @@ from numpy.typing import NDArray
 log = logging.getLogger(__name__)
 
 
+class GameState(Enum):
+    LOADING = "LOADING"
+    SONG_SELECT = "SONG_SELECT"
+    SONG_SELECTED = "SONG_SELECTED"
+    P1_SP_PLAY = "P1_SP_PLAY"
+    P2_SP_PLAY = "P2_SP_PLAY"
+    P1_DP_PLAY = "P1_DP_PLAY"
+    P2_DP_PLAY = "P2_DP_PLAY"
+    P1_SCORE = "P1_SCORE"
+    P2_SCORE = "P2_SCORE"
+    UNKNOWN = "UNKNOWN"
+
+
 @dataclass
-class StatePixel:
-    state: str = ""
+class GameStatePixel:
+    state: GameState = GameState.UNKNOWN
     name: str = ""
     y: int = 0
     x: int = 0
     b: int = 0
     g: int = 0
     r: int = 0
+
+
+@dataclass
+class PlayMetadata:
+    difficulty: str
+    level: int
+    lifebar_type: str
+    min_bpm: int
+    max_bpm: int
+    left_side: bool = True
+    is_double: bool = False
 
 
 @dataclass
@@ -241,7 +265,7 @@ class SongReference:
             found_results = difficulty_set.intersection(bpm_set).intersection(notes_set)
         else:
             found_results = difficulty_set.intersection(bpm_set)
-        log.info(f"PLAY METADATA SET: {found_results}")
+        log.debug(f"PLAY METADATA SET: {found_results}")
         return found_results
 
     def _resolve_artist_ocr(
@@ -308,7 +332,7 @@ class SongReference:
         )
         if found_artist_textage_id is not None:
             return found_artist_textage_id
-        log.debug("found_title_textage_id: {found_title_textage_id}")
+        log.debug(f"found_title_textage_id: {found_title_textage_id}")
         log.info(
             f"Could not find song_title: {song_title} "
             f"difficulty: {difficulty_tuple}"
@@ -334,6 +358,9 @@ class VideoProcessingState:
     metadata_title: Optional[Set[str]] = None
     left_side: Optional[bool] = None
     is_double: Optional[bool] = None
+    previous_state: GameState = GameState.UNKNOWN
+    current_state: GameState = GameState.UNKNOWN
+    state_frame_count: int = 0
 
     def __repr__(self):
         return (
@@ -348,11 +375,40 @@ class VideoProcessingState:
             f"ocr_song_title:{self.ocr_song_title}, "
             f"metadata_title:{self.metadata_title}, "
             f"left_side:{self.left_side}, "
-            f"is_double:{self.is_double}) "
+            f"is_double:{self.is_double}, "
+            f"previous_state:{self.previous_state}, "
+            f"current_state:{self.current_state}, "
+            f"state_frame_count:{self.state_frame_count}"
+            ")"
+        )
+
+    def metadata_is_set_except_title(self) -> bool:
+        return (
+            self.metadata_title is None
+            and self.difficulty is not None
+            and self.level is not None
+            and self.min_bpm is not None
+            and self.max_bpm is not None
+        )
+
+    def can_resolve_song_via_metadata(self) -> bool:
+        return (
+            self.difficulty
+            and self.level
+            and self.min_bpm
+            and self.max_bpm
+            and self.note_count
+        )
+
+    def know_sp_dp_and_sides_but_no_song_title(self) -> bool:
+        return (
+            self.ocr_song_title is None
+            and self.left_side is not None
+            and self.is_double is not None
         )
 
     def returned_to_song_select_before_writing(self) -> bool:
-        didnt_write: bool = (
+        return (
             self.score is not None
             or self.score_frame is not None
             or self.difficulty is not None
@@ -364,7 +420,6 @@ class VideoProcessingState:
             or self.left_side is not None
             or self.is_double is not None
         )
-        return didnt_write
 
     def score_data_found_at_score_screen(self) -> bool:
         return (
@@ -388,7 +443,8 @@ class VideoProcessingState:
             self.difficulty is None
             or self.level is None
             or self.lifebar_type is None
-            or self.lifebar_type == "UNKNOWN"
+            # TODO: fix
+            # or self.lifebar_type == "UNKNOWN"
             or self.min_bpm is None
             or self.max_bpm is None
             or self.left_side is None
@@ -399,3 +455,32 @@ class VideoProcessingState:
         return self.ocr_song_title is None or (
             self.ocr_song_future is not None and not self.ocr_song_future.done()
         )
+
+    def update_current_state(self, state: GameState) -> None:
+        self.previous_state = self.current_state
+        if state == self.current_state:
+            self.state_frame_count += 1
+        else:
+            self.current_state = state
+            self.state_frame_count = 1
+
+    def update_play_metadata(self, play_metadata: PlayMetadata) -> None:
+        self.difficulty = play_metadata.difficulty
+        self.level = play_metadata.level
+        self.lifebar_type = play_metadata.lifebar_type
+        self.min_bpm = play_metadata.min_bpm
+        self.max_bpm = play_metadata.max_bpm
+        self.left_side = play_metadata.left_side
+        self.is_double = play_metadata.is_double
+
+
+@dataclass
+class NumberArea:
+    start_x: int
+    start_y: int
+    x_offset: int
+    y_offset: int
+    rows: int
+    digits_per_row: int
+    name: str
+    kerning_offset: Optional[list[int]] = None
