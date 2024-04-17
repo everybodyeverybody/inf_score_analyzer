@@ -222,7 +222,6 @@ def read_scores_from_pngs(
         frame = cv.imread(str(image.absolute()))
         # TODO: fix SELECT_OPTIONS
         # TODO: fix DP_PLAY
-        # TODO: fix P2_SCORE
         # TODO: fix alternative layouts
         # TODO: have this use the same code path as the video loop
         game_state: GameState = hd_get_game_state_from_frame(frame, state_pixels)
@@ -298,7 +297,7 @@ def main() -> None:
     return
 
 
-logging.basicConfig(level=logging.DEBUG, format=CONSTANTS.LOG_FORMAT)
+logging.basicConfig(level=logging.INFO, format=CONSTANTS.LOG_FORMAT)
 log = logging.getLogger(__name__)
 log.info("starting up")
 main()
