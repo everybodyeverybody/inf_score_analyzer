@@ -5,7 +5,7 @@ from pathlib import Path
 import cv2 as cv  # type: ignore
 
 from inf_score_analyzer.local_dataclasses import Score
-import inf_score_analyzer.hd_score_frame_processor as score_frame_processor
+import inf_score_analyzer.score_frame_processor as score_frame_processor
 
 SCORE_FILES_DIR = "./tests/hd_score_images/"
 SCORE_FILES = [Path(file).absolute() for file in os.scandir(SCORE_FILES_DIR)]

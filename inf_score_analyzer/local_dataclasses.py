@@ -2,7 +2,7 @@ import logging
 from enum import Enum
 from concurrent.futures import Future
 from dataclasses import dataclass, field
-from typing import Dict, Set, Tuple, Optional
+from typing import Optional
 
 from numpy.typing import NDArray
 
@@ -115,7 +115,7 @@ class DifficultyMetadata:
     soflan: bool = False
 
 
-def generate_difficulty_metadata() -> Dict[Difficulty, DifficultyMetadata]:
+def generate_difficulty_metadata() -> dict[Difficulty, DifficultyMetadata]:
     return {
         Difficulty.SP_NORMAL: DifficultyMetadata(),
         Difficulty.SP_HYPER: DifficultyMetadata(),
@@ -136,7 +136,7 @@ class SongMetadata:
     genre: str
     textage_version_id: int
     alphanumeric: Alphanumeric
-    difficulty_metadata: Dict[Difficulty, DifficultyMetadata] = field(
+    difficulty_metadata: dict[Difficulty, DifficultyMetadata] = field(
         default_factory=generate_difficulty_metadata
     )
     version: str = ""
@@ -147,7 +147,7 @@ class SongMetadata:
             "title": self.title,
             "artist": self.artist,
             "genre": self.genre,
-            "textage_version_id": self.version_id,
+            "textage_version_id": self.version,
             "version": self.version,
             "alphanumeric": self.alphanumeric.name,
             "difficulty_metadata": {
@@ -191,7 +191,7 @@ class SongMetadata:
 
     def __check_difficulty_rate(self, difficulty: Difficulty) -> str:
         """
-        Set any blanks to appear after other entries by setting them to ZZZ.
+        set any blanks to appear after other entries by setting them to ZZZ.
         Otherwise prepend 0s to any single digit difficulties for string
         based sorting.
         """
@@ -246,18 +246,18 @@ class OCRSongTitles:
 
 @dataclass
 class SongReference:
-    by_artist: Dict[str, Set[str]] = field(default_factory=dict)
-    by_difficulty: Dict[Tuple[str, int], Set[str]] = field(default_factory=dict)
-    by_title: Dict[str, str] = field(default_factory=dict)
-    by_bpm: Dict[Tuple[int, int], Set[str]] = field(default_factory=dict)
-    by_note_count: Dict[int, Set[str]] = field(default_factory=dict)
+    by_artist: dict[str, set[str]] = field(default_factory=dict)
+    by_difficulty: dict[tuple[str, int], set[str]] = field(default_factory=dict)
+    by_title: dict[str, str] = field(default_factory=dict)
+    by_bpm: dict[tuple[int, int], set[str]] = field(default_factory=dict)
+    by_note_count: dict[int, set[str]] = field(default_factory=dict)
 
     def resolve_by_play_metadata(
         self,
-        difficulty_tuple: Tuple[str, int],
-        bpm_tuple: Tuple[int, int],
+        difficulty_tuple: tuple[str, int],
+        bpm_tuple: tuple[int, int],
         note_count: Optional[int] = None,
-    ) -> Set[str]:
+    ) -> set[str]:
         difficulty_set = self.by_difficulty[difficulty_tuple]
         bpm_set = self.by_bpm[bpm_tuple]
         if note_count is not None:
@@ -269,7 +269,7 @@ class SongReference:
         return found_results
 
     def _resolve_artist_ocr(
-        self, song_title: OCRSongTitles, found_difficulty_textage_ids: Set[str]
+        self, song_title: OCRSongTitles, found_difficulty_textage_ids: set[str]
     ) -> Optional[str]:
         found_artist_textage_id = None
         found_en_artist_textage_ids = self.by_artist.get(song_title.en_artist, set([]))
@@ -287,7 +287,7 @@ class SongReference:
         return found_artist_textage_id
 
     def _resolve_title_ocr(
-        self, song_title: OCRSongTitles, found_difficulty_textage_ids: Set[str]
+        self, song_title: OCRSongTitles, found_difficulty_textage_ids: set[str]
     ) -> Optional[str]:
         found_title_textage_id = None
         found_en_title_textage_id = self.by_title.get(song_title.en_title, None)
@@ -310,7 +310,7 @@ class SongReference:
     def resolve_ocr(
         self, song_title: OCRSongTitles, difficulty: str, level: int
     ) -> Optional[str]:
-        difficulty_tuple: Tuple[str, int] = (difficulty, level)
+        difficulty_tuple: tuple[str, int] = (difficulty, level)
         found_difficulty_textage_ids = self.by_difficulty.get(difficulty_tuple, set([]))
         if not found_difficulty_textage_ids:
             log.info(f"Could not lookup difficulty {difficulty_tuple}")
@@ -339,7 +339,7 @@ class SongReference:
         )
         return None
 
-    def resolve_strings(self, title: OCRSongTitles, metadata_titles: Set[str]):
+    def resolve_strings(self, title: OCRSongTitles, metadata_titles: set[str]):
         pass
 
 
@@ -355,7 +355,7 @@ class VideoProcessingState:
     note_count: Optional[int] = None
     ocr_song_future: Optional[Future] = None
     ocr_song_title: Optional[OCRSongTitles] = None
-    metadata_title: Optional[Set[str]] = None
+    metadata_title: Optional[set[str]] = None
     left_side: Optional[bool] = None
     is_double: Optional[bool] = None
     previous_state: GameState = GameState.UNKNOWN
@@ -382,29 +382,13 @@ class VideoProcessingState:
             ")"
         )
 
-    def metadata_is_set_except_title(self) -> bool:
+    def can_resolve_song_via_metadata(self) -> bool:
         return (
-            self.metadata_title is None
-            and self.difficulty is not None
+            self.difficulty is not None
             and self.level is not None
             and self.min_bpm is not None
             and self.max_bpm is not None
-        )
-
-    def can_resolve_song_via_metadata(self) -> bool:
-        return (
-            self.difficulty
-            and self.level
-            and self.min_bpm
-            and self.max_bpm
-            and self.note_count
-        )
-
-    def know_sp_dp_and_sides_but_no_song_title(self) -> bool:
-        return (
-            self.ocr_song_title is None
-            and self.left_side is not None
-            and self.is_double is not None
+            and self.note_count is not None
         )
 
     def returned_to_song_select_before_writing(self) -> bool:
@@ -421,23 +405,6 @@ class VideoProcessingState:
             or self.is_double is not None
         )
 
-    def score_data_found_at_score_screen(self) -> bool:
-        return (
-            self.score is not None
-            and self.score_frame is not None
-            and self.ocr_song_title is not None
-            and self.difficulty is not None
-            and self.level is not None
-            and self.metadata_title is not None
-        )
-
-    def score_data_was_captured(self) -> bool:
-        return (
-            self.ocr_song_title is not None
-            and self.score is not None
-            and self.score_frame is None
-        )
-
     def play_metadata_missing(self) -> bool:
         return (
             self.difficulty is None
@@ -449,11 +416,6 @@ class VideoProcessingState:
             or self.max_bpm is None
             or self.left_side is None
             or self.is_double is None
-        )
-
-    def ocr_is_not_done_processing(self) -> bool:
-        return self.ocr_song_title is None or (
-            self.ocr_song_future is not None and not self.ocr_song_future.done()
         )
 
     def update_current_state(self, state: GameState) -> None:
