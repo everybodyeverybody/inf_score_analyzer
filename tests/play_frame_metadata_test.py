@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import re
 import os
 import logging
 from typing import Any
@@ -7,7 +6,7 @@ from pathlib import Path
 
 import cv2 as cv  # type: ignore
 
-import inf_score_analyzer.hd_play_frame_processor as play_frame_processor
+from inf_score_analyzer import play_frame_processor
 
 PLAY_FILES_DIR = "./tests/hd_play_images/"
 PLAY_FILES = [Path(file).absolute() for file in os.scandir(PLAY_FILES_DIR)]
@@ -52,7 +51,7 @@ for file in PLAY_FILES:
 def test_bpm_reader() -> None:
     for file, metadata in PLAY_FILES_METADATA.items():
         frame = cv.imread(file)
-        min_bpm, max_bpm = play_frame_processor.hd_read_bpm(
+        min_bpm, max_bpm = play_frame_processor.read_bpm(
             frame, metadata["left_side"], metadata["is_doubles"]
         )
         assert metadata["min_bpm"] == min_bpm
@@ -62,7 +61,7 @@ def test_bpm_reader() -> None:
 def test_difficulty_reader() -> None:
     for file, metadata in PLAY_FILES_METADATA.items():
         frame = cv.imread(file)
-        difficulty = play_frame_processor.hd_read_play_difficulty(
+        difficulty = play_frame_processor.read_play_difficulty(
             frame, metadata["left_side"], metadata["is_doubles"]
         )
         assert metadata["difficulty"] == difficulty
@@ -73,7 +72,7 @@ def test_level_reader() -> None:
         logging.debug(file)
         logging.debug(metadata)
         frame = cv.imread(file)
-        level = play_frame_processor.hd_read_play_level(
+        level = play_frame_processor.read_play_level(
             frame, metadata["left_side"], metadata["is_doubles"]
         )
         assert metadata["level"] == level

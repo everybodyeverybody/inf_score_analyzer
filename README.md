@@ -18,7 +18,7 @@ either via capture card or software
 
 - `python3 -m venv .venv`
 - `source .venv/bin/activate`
-- `pip3 install -r requirements.txt`
+- `python3 -m pip install .` or `python3 -m pip install -r requirements.txt`
 
 ## Usage 
 
@@ -33,6 +33,7 @@ python3 -m inf_score_analyzer
 - load in configuration metadata from `data/`
 - open the first available video input device on the computer
 - loop over frames received from the input device, providing metadata every 300 seconds
+- on quitting, attempts to export the current session's scores to [kamaitachi](https://kamai.tachi.ac/)
 
 During the video loop, if the application encouters frames that appear to be
 a beatmania IIDX INFINITAS play session followed by a score screen, it will
@@ -45,8 +46,9 @@ This was written on an Intel Mac, and so has only been really tested there.
 This is functionally complete for myself, but I wanted to put it out there as proof.
 
 This does support 1P, 2P and DP sessions, but assumes that one is using
-the default window arrangement. The alternative window arrangements
-will be handled in future work.
+the default window arrangement. The HD update and my general lack of not playing
+2P or DP has delayed setting the needed screen pixel constants for that in some 
+parts of code, but will be handled in future work.
 
 ## Contributions
 
@@ -66,11 +68,8 @@ get to sooner or later.
 
 - windows and linux support
 - alternative window arrangements
-- refactor out very redundant code pieces (there are several)
 - have community difficulty tables imported and mapped to textage data
-- have this submit new scores to online score trackers
 - collect time series data per song to see where one can improve specifically
 - generate useful reports regarding scores/history
 - implement a step-up-like song recommender
 - plugin for obs based on this project's work
-- break out textage code into its own module

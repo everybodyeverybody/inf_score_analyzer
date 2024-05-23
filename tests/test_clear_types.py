@@ -6,8 +6,8 @@ from pathlib import Path
 import cv2 as cv  # type: ignore
 
 from inf_score_analyzer.local_dataclasses import ClearType
-from inf_score_analyzer.hd_score_frame_processor import (
-    hd_get_clear_type_from_results_screen,
+from inf_score_analyzer.score_frame_processor import (
+    get_clear_type_from_results_screen,
 )
 
 
@@ -33,6 +33,6 @@ def test_clear_type_reader():
     for file, attributes in CLEAR_FILES_METADATA.items():
         logging.debug(f"{file}")
         frame = cv.imread(file)
-        assert attributes["clear_type"] == hd_get_clear_type_from_results_screen(
+        assert attributes["clear_type"] == get_clear_type_from_results_screen(
             frame, attributes["left_side"]
         )

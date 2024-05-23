@@ -184,5 +184,5 @@ APP_DB = DATA_DIR / Path(APP_DB_NAME)
 USER_DB = DATA_DIR / Path(USER_DB_NAME)
 MIN_APP_AGE_UPDATE_SECONDS = 43200
 TACHI_API_TOKEN = os.getenv("TACHI_API_TOKEN")
-
+KAMAITACHI_API_URL = "https://kamai.tachi.ac/ir/direct-manual/import"
 KAMAITACHI_SONG_LIST_URL = "https://raw.githubusercontent.com/zkldi/Tachi/main/database-seeds/collections/songs-iidx.json"

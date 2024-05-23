@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from typing import Set, List
 from .local_dataclasses import GameState, GameStatePixel
 
 P1_SCORE_MIDDLE = GameStatePixel(
@@ -104,15 +103,15 @@ SONG_SELECT_SCORE_DATA = GameStatePixel(
 )
 
 
-SCORE_STATES: Set[GameState] = {GameState.P1_SCORE, GameState.P2_SCORE}
-PLAY_STATES: Set[GameState] = {
+SCORE_STATES: set[GameState] = {GameState.P1_SCORE, GameState.P2_SCORE}
+PLAY_STATES: set[GameState] = {
     GameState.P1_SP_PLAY,
     GameState.P2_SP_PLAY,
     GameState.P1_DP_PLAY,
     GameState.P2_DP_PLAY,
 }
 
-ALL_STATE_PIXELS: List[GameStatePixel] = [
+ALL_STATE_PIXELS: list[GameStatePixel] = [
     P1_SCORE_MIDDLE,
     P1_SCORE_TIMING_T,
     P1_SP_NORMAL_PLAY_EXTRA_STAGE,

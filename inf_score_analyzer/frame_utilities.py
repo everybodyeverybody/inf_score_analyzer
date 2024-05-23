@@ -17,6 +17,8 @@ from .constants import (
 )
 from .local_dataclasses import GameStatePixel, Point
 
+from line_profiler import profile
+
 log = logging.getLogger(__name__)
 
 
@@ -155,14 +157,13 @@ def is_bright(block: NDArray, point: Point) -> bool:
     return is_bright_pixel(read_pixel(block, point))
 
 
+@profile
 def check_pixel_color_in_frame(
     frame: NDArray,
     pixel: GameStatePixel,
     specific_color: Optional[tuple[int, int, int]] = None,
     tolerance: int = 15,
 ) -> bool:
-    frame_value = frame[pixel.y][pixel.x]
-    # log.debug(f"check_pixel_color_in_frame frame_value {frame_value}")
     if specific_color is None:
         max_red = pixel.r + tolerance
         min_red = pixel.r - tolerance
@@ -178,47 +179,17 @@ def check_pixel_color_in_frame(
         max_blue = specific_color[0] + tolerance
         min_blue = specific_color[0] - tolerance
     if (
-        frame_value[0] >= min_blue
-        and frame_value[0] <= max_blue
-        and frame_value[1] >= min_green
-        and frame_value[1] <= max_green
-        and frame_value[2] >= min_red
-        and frame_value[2] <= max_red
+        frame[pixel.y][pixel.x][0] >= min_blue
+        and frame[pixel.y][pixel.x][0] <= max_blue
+        and frame[pixel.y][pixel.x][1] >= min_green
+        and frame[pixel.y][pixel.x][1] <= max_green
+        and frame[pixel.y][pixel.x][2] >= min_red
+        and frame[pixel.y][pixel.x][2] <= max_red
     ):
         result = True
     else:
         result = False
     return result
-
-
-# def get_number_from_area(
-#    frame: NDArray,
-#    start_x: int,
-#    start_y: int,
-#    x_offset: int,
-#    y_offset: int,
-#    area_rows: int,
-#    row_digits: int,
-#    block_reader: Callable,
-# ) -> list[int]:
-#    area_numbers: list[int] = []
-#    for row in range(area_rows):
-#        number: int = 0
-#        row_start_y = start_y + (row * y_offset)
-#        for column_index in range(row_digits):
-#            place = 10 ** (row_digits - (column_index + 1))
-#            end_y = row_start_y + y_offset
-#            block_start_x = start_x + (x_offset * column_index)
-#            block_end_x = block_start_x + x_offset
-#            score_digit_block = get_rectanglular_subsection_from_frame(
-#                frame, row_start_y, block_start_x, end_y, block_end_x
-#            )
-#            if logging.getLogger().isEnabledFor(logging.DEBUG):
-#                log.debug("ASCII\n" + get_array_as_ascii_art(score_digit_block))
-#            read_number = block_reader(score_digit_block)
-#            number += read_number * place
-#        area_numbers.append(number)
-#    return area_numbers
 
 
 def get_numbers_from_area(

@@ -1,373 +1,152 @@
 #!/usr/bin/env python3
-import io
-import re
-import uuid
+import copy
 import logging
-import sqlite3
+from typing import Any
 from decimal import Decimal
-from datetime import datetime, timezone
-from typing import Callable, Set, Optional
 
-import numpy  # type: ignore
-import polyleven  # type: ignore
+# type: ignore
 from numpy.typing import NDArray
 
+from . import sqlite_client
 from .local_dataclasses import (
     Point,
     Score,
-    OCRSongTitles,
-    Difficulty,
-    SongReference,
     ClearType,
+    SongReference,
+    VideoProcessingState,
 )
 from .frame_utilities import (
     get_rectanglular_subsection_from_frame,
     is_white,
-    is_black,
     is_bright,
-    read_pixel,
+    get_numbers_from_area,
 )
 from . import constants as CONSTANTS
 
 log = logging.getLogger(__name__)
 
 
-def write_score_sqlite(
-    session_uuid: str,
-    title: OCRSongTitles,
-    score: Score,
-    difficulty: str,
-    score_frame: NDArray,
-    song_reference: SongReference,
-    level: int,
-    metadata_title: Set[str],
-) -> None:
-    referenced_textage_id = None
-    resolved_song_info = song_reference.resolve_ocr(title, difficulty, level)
-    if resolved_song_info is not None:
-        referenced_textage_id = resolved_song_info
-    else:
-        if len(metadata_title) == 1:
-            log.info("Using metadata title")
-            referenced_textage_id = metadata_title.pop()
-        else:
-            log.warning(f"Found too much metadata, {metadata_title}, tiebreaking")
-            referenced_textage_id = metadata_lookup_tiebreaker(metadata_title, title)
-            log.warning(f"Tiebreaker found: {referenced_textage_id}")
-
-    difficulty_id = Difficulty[difficulty].value
-    log.info(f"Difficulty: {Difficulty[difficulty]}")
-    log.info("TRYING SQLITE WRITE")
-    score_uuid = str(uuid.uuid4())
-    end_time_utc = datetime.now(timezone.utc)
-
-    score_frame_bytes = io.BytesIO()
-    numpy.savez(score_frame_bytes, frame_slice=score_frame)
-    score_frame_bytes.seek(0)
-
-    score_query = (
-        "insert into score values ("
-        ":score_uuid,"
-        ":session_uuid,"
-        ":textage_id,"
-        ":difficulty_id,"
-        ":perfect_great,"
-        ":great,"
-        ":good,"
-        ":bad,"
-        ":poor,"
-        ":fast,"
-        ":slow,"
-        ":combo_break,"
-        ":grade,"
-        ":clear_type,"
-        ":failure_measure,"
-        ":failure_note,"
-        ":end_time_utc"
-        ")"
-    )
-    user_db_connection = sqlite3.connect(CONSTANTS.USER_DB)
-    db_cursor = user_db_connection.cursor()
-    db_cursor.execute(
-        score_query,
-        {
-            "score_uuid": score_uuid,
-            "session_uuid": session_uuid,
-            "textage_id": referenced_textage_id,
-            "difficulty_id": difficulty_id,
-            "perfect_great": score.fgreat,
-            "great": score.great,
-            "good": score.good,
-            "bad": score.bad,
-            "poor": score.poor,
-            "fast": score.fast,
-            "slow": score.slow,
-            "combo_break": None,
-            "grade": score.grade,
-            "clear_type": score.clear_type,
-            "failure_measure": None,
-            "failure_note": None,
-            "end_time_utc": end_time_utc,
-        },
-    )
-    ocr_query = (
-        "insert into score_ocr "
-        "values (:score_uuid, :result_screengrab, :title_scaled,"
-        ":en_title_ocr, :en_artist_ocr, :jp_title_ocr, :jp_artist_ocr)"
-    )
-    db_cursor.execute(
-        ocr_query,
-        {
-            "score_uuid": score_uuid,
-            "result_screengrab": score_frame_bytes.getvalue(),
-            "title_scaled": None,
-            "en_title_ocr": title.en_title,
-            "en_artist_ocr": title.en_artist,
-            "jp_title_ocr": title.jp_title,
-            "jp_artist_ocr": title.jp_artist,
-        },
-    )
-    user_db_connection.commit()
-    return None
-
-
-def metadata_lookup_tiebreaker(
-    metadata_titles: Set[str], ocr_titles: OCRSongTitles
-) -> str:
-    """
-    Calculates the levenshtein distance on songs that match
-    play metadata (note count, difficulty, bpm) versus
-    what is provided by our OCR library to determine
-    the song title.
-
-    In cases of ties, this raises an exception, indicating
-    we have missed some special case or overlap, or that
-    OCR is underperforming or outputting garbage.
-
-    https://en.wikipedia.org/wiki/Levenshtein_distance
-    """
-    lowest_score = -1
-    lowest_textage_id = None
-    lowest_has_tie = False
-    app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
-    db_cursor = app_db_connection.cursor()
-    ids_as_string = ",".join([f"'{id}'" for id in metadata_titles])
-    query = (
-        "select textage_id, artist, title "
-        "from songs "
-        f"where textage_id in ({ids_as_string})"
-    )
-    results = db_cursor.execute(query).fetchall()
-    scores = {}
-    for textage_id, artist, title in results:
-        score = polyleven.levenshtein(ocr_titles.en_artist, artist)
-        score += polyleven.levenshtein(ocr_titles.en_title, title)
-        score += polyleven.levenshtein(ocr_titles.jp_artist, artist)
-        score += polyleven.levenshtein(ocr_titles.jp_title, title)
-        scores[textage_id] = score
-    # We only care about ties for the lowest score
-    # so we sort to get the elements in ascending score order
-    sorted_scores = {t: scores[t] for t in sorted(scores, key=scores.get)}  # type: ignore
-    for textage_id, score in sorted_scores.items():
-        if lowest_score != -1 and score == lowest_score:
-            lowest_has_tie = True
-        if lowest_score == -1 or score < lowest_score:
-            lowest_textage_id = textage_id
-            lowest_score = score
-    if lowest_has_tie or lowest_textage_id is None:
-        raise RuntimeError(
-            "Couldn't figure out song title from OCR data and metadata. "
-            f"song metadata: {metadata_titles} "
-            f"ocr data: {ocr_titles} "
-            f"similarity scores: {sorted_scores} "
-        )
-    return lowest_textage_id
-
-
-def fast_slow_digit_reader(block: NDArray) -> str:
-    top_mid = Point(x=5, y=1)
-    mid_top = Point(x=5, y=4)
-    top_right = Point(x=9, y=1)
-    mid_bottom = Point(x=5, y=5)
-    mid_left_top = Point(x=1, y=4)
-    mid_left_bottom = Point(x=1, y=5)
-    mid_right_bottom = Point(x=9, y=5)
-    if is_white(read_pixel(block, mid_left_bottom)):
-        log.debug("MIGHT BE 02689")
-        if is_white(read_pixel(block, mid_top)):
-            log.debug("PROBABLY 268")
-            if is_white(read_pixel(block, top_right)):
-                log.debug("PROBABLY 28")
-                if is_white(read_pixel(block, mid_right_bottom)):
-                    log.debug("DEFINITELY 8")
-                    return "8"
-                else:
-                    log.debug("DEFINITELY 2")
-                    return "2"
-            else:
-                log.debug("DEFINITELY 6")
-                return "6"
-        else:
-            log.debug("PROBABLY 09")
-            if is_white(read_pixel(block, mid_bottom)):
-                log.debug("DEFINITELY 9")
-                return "9"
-            else:
-                log.debug("DEFINITELY 0")
-                return "0"
-    else:
-        log.debug("MIGHT BE 13457_")
-        if is_white(read_pixel(block, mid_left_top)):
-            log.debug("PROBABLY 45")
-            if is_white(read_pixel(block, top_mid)):
-                log.debug("DEFINITELY 5")
-                return "5"
-            else:
+def fast_slow_digit_reader(block: NDArray) -> int:
+    top_left = Point(x=1, y=1)
+    top_left_gap = Point(x=1, y=3)
+    bottom_right_gap = Point(x=12, y=10)
+    top_right_gap = Point(x=12, y=4)
+    bottom_left_gap = Point(x=1, y=10)
+    middle_top = Point(x=8, y=5)
+    middle_third_row_center = Point(x=8, y=7)
+    if is_white(block, top_left):
+        log.debug("MIGHT BE 2345")
+        if is_white(block, top_left_gap):
+            log.debug("MIGHT BE 45")
+            if is_white(block, top_right_gap):
                 log.debug("DEFINITELY 4")
-                return "4"
-        else:
-            log.debug("PROBABLY 137_")
-            if is_white(read_pixel(block, mid_bottom)):
-                log.debug("DEFINITELY 1")
-                return "1"
-            elif is_white(read_pixel(block, mid_top)):
-                log.debug("DEFINITELY 3")
-                return "3"
-            elif is_white(read_pixel(block, top_right)):
-                log.debug("DEFINITELY 7")
-                return "7"
+                return 4
             else:
-                log.debug("DEFINITELY BLANK")
-                return " "
-    return "X"
-
-
-def score_digit_reader(block: NDArray) -> str:
-    top_mid = Point(10, 3)
-    mid_top = Point(10, 6)
-    mid1 = Point(10, 7)
-    mid2 = Point(10, 8)
-    top_left = Point(3, 4)
-    bottom_left = Point(3, 11)
-    bottom_right = Point(15, 11)
-
-    if is_white(read_pixel(block, mid1)) and is_white(read_pixel(block, mid2)):
-        log.debug("MIGHT BE 12358")
-        if is_white(read_pixel(block, bottom_left)):
-            log.debug("PROBABLY 28")
-            if is_white(read_pixel(block, top_left)):
-                log.debug("DEFINITELY 8")
-                return "8"
+                log.debug("DEFINITELY 5")
+                return 5
+        else:
+            log.debug("MIGHT BE 23")
+            if is_white(block, bottom_right_gap):
+                log.debug("DEFINITELY 3")
+                return 3
             else:
                 log.debug("DEFINITELY 2")
-                return "2"
-        elif is_white(read_pixel(block, bottom_right)):
-            log.debug("PROBABLY 35")
-            if is_white(read_pixel(block, top_left)):
-                log.debug("DEFINITELY 5")
-                return "5"
+                return 2
+    else:
+        log.debug("MIGHT BE 678901_")
+        if is_white(block, top_right_gap):
+            log.debug("MIGHT BE 9780")
+            if is_white(block, middle_third_row_center):
+                log.debug("MIGHT BE 89")
+                if is_white(block, bottom_left_gap):
+                    log.debug("DEFINITELY 8")
+                    return 8
+                else:
+                    log.debug("DEFINITELY 9")
+                    return 9
             else:
+                log.debug("MIGHT BE 70")
+                if is_white(block, bottom_left_gap):
+                    log.debug("DEFINITELY 0")
+                    return 0
+                else:
+                    log.debug("DEFINITELY 7")
+                    return 7
+        else:
+            log.debug("MIGHT BE 61_")
+            if is_white(block, middle_top):
+                log.debug("MIGHT BE 61")
+                if is_white(block, top_left_gap):
+                    log.debug("DEFINITELY 6")
+                    return 6
+                else:
+                    log.debug("DEFINITELY 1")
+                    return 1
+            else:
+                log.debug("DEFINITELY ' '")
+                return 0
+
+
+def score_digit_reader(block: NDArray) -> int:
+    top_left_gap = Point(3, 5)
+    exact_middle = Point(12, 8)
+    top_right_gap = Point(22, 5)
+    bottom_left_gap = Point(3, 11)
+    bottom_right_gap = Point(22, 11)
+    bottom_middle = Point(12, 14)
+    top_middle = Point(12, 2)
+    log.debug("READING")
+    if is_white(block, top_left_gap):
+        log.debug("MIGHT BE 0456789")
+        if is_white(block, bottom_left_gap):
+            log.debug("MIGHT BE 068")
+            if is_white(block, exact_middle):
+                log.debug("MIGHT BE 68")
+                if is_white(block, top_right_gap):
+                    log.debug("DEFINITELY 8")
+                    return 8
+                else:
+                    log.debug("DEFINITELY 6")
+                    return 6
+            else:
+                log.debug("DEFINITELY 0")
+                return 0
+        else:
+            log.debug("MIGHT BE 4579")
+            if is_white(block, bottom_middle):
+                log.debug("MIGHT BE 59")
+                if is_white(block, top_right_gap):
+                    log.debug("DEFINITELY 9")
+                    return 9
+                else:
+                    log.debug("DEFINITELY 5")
+                    return 5
+            else:
+                log.debug("MIGHT BE 47")
+                if is_white(block, top_middle):
+                    log.debug("DEFINITELY 7")
+                    return 7
+                else:
+                    log.debug("DEFINITELY 4")
+                    return 4
+    else:
+        log.debug("MIGHT BE _123")
+        if is_white(block, top_right_gap):
+            log.debug("MIGHT BE 23")
+            if is_white(block, bottom_right_gap):
                 log.debug("DEFINITELY 3")
-                return "3"
+                return 3
+            else:
+                log.debug("DEFINITELY 2")
+                return 2
         else:
-            log.debug("DEFINITELY 1")
-            return "1"
-    elif not is_white(read_pixel(block, mid1)) and not is_white(
-        read_pixel(block, mid2)
-    ):
-        log.debug("MIGHT BE 07")
-        if is_white(read_pixel(block, bottom_left)):
-            log.debug("DEFINITELY 0")
-            return "0"
-        elif is_white(read_pixel(block, top_left)):
-            log.debug("DEFINITELY 7")
-            return "7"
-        else:
-            log.debug("DEFINITELY BLANK")
-            return " "
-    else:
-        log.debug("MIGHT BE 469")
-        if is_white(read_pixel(block, mid_top)):
-            log.debug("DEFINITELY 6")
-            return "6"
-        elif is_white(read_pixel(block, top_mid)):
-            log.debug("DEFINITELY 9")
-            return "9"
-        else:
-            log.debug("DEFINITELY 4")
-            return "4"
-    return "X"
-
-
-def get_score_from_score_level_row(
-    result_screen: NDArray,
-    row_start_x: int,
-    row_start_y: int,
-    x_offset: int,
-    y_offset: int,
-    block_reader: Callable,
-    score_digit_column_count: int = 4,
-    ascii_print: bool = False,
-) -> int:
-    score_string = ""
-    for column_index in range(score_digit_column_count):
-        end_y = row_start_y + y_offset
-        block_start_x = row_start_x + x_offset * column_index
-        block_end_x = block_start_x + x_offset
-        score_digit_block = get_rectanglular_subsection_from_frame(
-            result_screen, row_start_y, block_start_x, end_y, block_end_x
-        )
-        # score_string += score_digit_reader(score_digit_block)
-        score_string += block_reader(score_digit_block)
-
-        # if logging.DEBUG > log.level:
-        #    log.debug("ASCII\n" + get_array_as_ascii_art(score_digit_block))
-
-    if re.match(score_string.strip(), r"^[^\d]+$"):
-        return 0
-    else:
-        log.debug(f"score string {score_string}")
-        log.debug(f"stripped {score_string.strip()}")
-        return int(score_string.strip())
-
-
-def get_score_from_score_area(
-    result_screen: NDArray,
-    start_x: int,
-    start_y: int,
-    x_offset: int,
-    y_offset: int,
-    block_reader: Callable,
-    score_level_row_count: int = 5,
-) -> list:
-    scores: list[int] = []
-    for row in range(score_level_row_count):
-        row_start_y = start_y + row * y_offset
-        score = get_score_from_score_level_row(
-            result_screen, start_x, row_start_y, x_offset, y_offset, block_reader
-        )
-        scores.append(score)
-    return scores
-
-
-def get_speed_area_origin(left_side: bool, is_double: bool) -> tuple[int, int]:
-    if left_side:
-        start_x = 65
-        start_y = 635
-    else:
-        start_x = 945
-        start_y = 635
-    return start_x, start_y
-
-
-def get_score_area_origin(left_side: bool) -> tuple[int, int]:
-    if left_side:
-        start_x = 270
-        start_y = 509
-    else:
-        start_x = 1151
-        start_y = 509
-    return start_x, start_y
+            log.debug("MIGHT BE _1")
+            if is_white(block, exact_middle):
+                log.debug("DEFINITELY 1")
+                return 1
+            else:
+                log.debug("DEFINITELY ' '")
+                return 0
 
 
 def calculate_grade(perfect_greats: int, greats: int, note_count: int) -> str:
@@ -393,160 +172,213 @@ def calculate_grade(perfect_greats: int, greats: int, note_count: int) -> str:
 
 
 def get_clear_type_from_results_screen(frame: NDArray, left_side: bool) -> ClearType:
-    start_y = 267
-    end_y = 280
+    start_y = 417
+    end_y = 437
     if left_side:
-        start_x = 254
-        end_x = 333
+        start_x = 366
+        end_x = 512
     else:
-        start_x = 1134
-        end_x = 1213
+        raise RuntimeError("2p score type not implemented")
     subs = get_rectanglular_subsection_from_frame(frame, start_y, start_x, end_y, end_x)
-    far_left_middle = Point(x=2, y=6)
-    top_mid = Point(x=32, y=0)
-    top_mid_clear_area = Point(x=38, y=0)
-    below_failed_a = Point(x=25, y=12)
-    hard_dash = Point(x=17, y=4)
-    easy_e_corner = Point(x=13, y=0)
-    if is_bright(read_pixel(subs, far_left_middle)):
-        log.debug("PROBABLY EXHARD or FULL_COMBO")
-        if is_black(read_pixel(subs, top_mid)):
-            log.debug("DEFINITELY FULL_COMBO")
-            return ClearType.FULL_COMBO
-        else:
-            log.debug("DEFINITELY ClearType.EXHARD")
-            return ClearType.EXHARD
-    elif is_black(read_pixel(subs, top_mid_clear_area)):
-        log.debug("PROBABLY FAILED OR NORMAL")
-        if is_black(read_pixel(subs, below_failed_a)):
-            log.debug("DEFINITELY NORMAL")
-            return ClearType.NORMAL
-        else:
-            log.debug("DEFINITELY FAILED")
-            return ClearType.FAILED
-        return ClearType.FAILED
-    else:
-        log.debug("PROBABLY ASSIST, HARD, OR EASY")
-        if not is_black(read_pixel(subs, hard_dash)):
-            log.debug("PROBABLY EASY OR ASSIST")
-            if is_black(read_pixel(subs, easy_e_corner)):
+    top_left = Point(y=5, x=23)
+    first_letter_black = Point(y=10, x=25)
+    easy_clear_r = Point(y=6, x=113)
+    combo_or_clear = Point(y=2, x=86)
+    clear_or_hard = Point(y=5, x=86)
+    if is_bright(subs, top_left):
+        log.debug("PROBABLY ASSIST EASY EXH")
+        if is_bright(subs, first_letter_black):
+            log.debug("PROBABLY EASY EXH")
+            if is_bright(subs, easy_clear_r):
                 log.debug("DEFINITELY EASY")
                 return ClearType.EASY
             else:
-                log.debug("DEFINITELY ASSIST")
-                return ClearType.ASSIST
+                log.debug("DEFINITELY EXHARD")
+                return ClearType.EXHARD
+        else:
+            log.debug("DEFINITELY ASSIST")
+            return ClearType.ASSIST
+    else:
+        log.debug("PROBABLY FAILED NORMAL HARD FULLCOMBO")
+        if not is_bright(subs, easy_clear_r):
+            log.debug("DEFINITELY FAILED")
+            return ClearType.FAILED
+        elif not is_bright(subs, combo_or_clear):
+            log.debug("DEFINITELY FULL_COMBO")
+            return ClearType.FULL_COMBO
+        elif is_bright(subs, clear_or_hard):
+            log.debug("DEFINITELY NORMAL")
+            return ClearType.NORMAL
         else:
             log.debug("DEFINITELY HARD")
             return ClearType.HARD
-    log.error("Could not determine ClearType")
     return ClearType.UNKNOWN
 
 
+def get_note_count(frame: NDArray) -> int:
+    return get_numbers_from_area(frame, CONSTANTS.NOTES_AREA, note_count_reader)[0]
+
+
 def get_score_from_result_screen(
-    frame: NDArray, left_side: bool, is_double: bool, note_count: Optional[int] = None
+    frame: NDArray, left_side: bool, is_double: bool
 ) -> Score:
-    score_area_x, score_area_y = get_score_area_origin(left_side)
-    scores = get_score_from_score_area(
-        frame,
-        score_area_x,
-        score_area_y,
-        CONSTANTS.SCORE_DIGIT_X_OFFSET,
-        CONSTANTS.SCORE_DIGIT_Y_OFFSET,
-        score_digit_reader,
-    )
-    speed_area_x, speed_area_y = get_speed_area_origin(left_side, is_double)
-    fast_slow = get_score_from_score_area(
-        frame,
-        speed_area_x,
-        speed_area_y,
-        CONSTANTS.FAST_SLOW_X_OFFSET,
-        CONSTANTS.FAST_SLOW_Y_OFFSET,
-        fast_slow_digit_reader,
-        2,
-    )
+    log.info("reading score...")
+    if left_side:
+        score_area = CONSTANTS.SCORE_P1_AREA
+        fast_slow_area = CONSTANTS.FAST_SLOW_P1_AREA
+    else:
+        raise RuntimeError("2p is not yet supported")
+    scores = get_numbers_from_area(frame, score_area, score_digit_reader)
+    fast_slow = get_numbers_from_area(frame, fast_slow_area, fast_slow_digit_reader)
+    note_count = get_note_count(frame)
+    log.debug(f"SCORES: {scores}")
+    log.debug(f"FAST_SLOW {fast_slow}")
+    log.debug(f"NOTE COUNT {note_count}")
     if note_count is None:
         grade = "X"
     else:
         grade = calculate_grade(scores[0], scores[1], note_count)
     clear_type = get_clear_type_from_results_screen(frame, left_side)
-    scores.extend(fast_slow)
-    scores.append(grade)
-    scores.append(clear_type.name)
-    return Score(*scores)
+    score_data: list[Any] = []
+    score_data.extend(scores)
+    score_data.extend(fast_slow)
+    score_data.append(grade)
+    score_data.append(clear_type.name)
+    log.debug(score_data)
+    return Score(*score_data)
 
 
-def get_note_count(frame: NDArray) -> int:
-    notes_top_left_x = 678
-    notes_top_left_y = 686
-    notes_bottom_right_y = 700
-    block_width = 14
-    digits_sum = 0
-
-    left_curve_indent = Point(x=4, y=8)
-    bottom_middle = Point(x=6, y=12)
-    top_right_curve = Point(x=8, y=4)
-    top_mid_left = Point(x=3, y=4)
-    top_center = Point(x=6, y=4)
-    bottom_right_curve = Point(x=8, y=9)
-    top_left_of_seven = Point(x=4, y=1)
-    top_point_of_four = Point(x=9, y=1)
-
-    for digit in range(4):
-        magnitude = 10 ** (3 - digit)
-        block_top_left_x = notes_top_left_x + (digit * block_width)
-        block_top_left_y = notes_top_left_y
-        block_bottom_right_x = notes_top_left_x + ((digit + 1) * block_width)
-        block_bottom_right_y = notes_bottom_right_y
-        digit_area = get_rectanglular_subsection_from_frame(
-            frame=frame,
-            top_left_x=block_top_left_x,
-            top_left_y=block_top_left_y,
-            bottom_right_x=block_bottom_right_x,
-            bottom_right_y=block_bottom_right_y,
-        )
-        if is_black(read_pixel(digit_area, left_curve_indent)):
-            log.debug("PROBABLY 359")
-            if not is_black(read_pixel(digit_area, top_right_curve)):
-                log.debug("PROBABLY 39")
-                if is_black(read_pixel(digit_area, top_mid_left)):
-                    log.debug("DEFINITELY 3")
-                    digits_sum += magnitude * 3
-                else:
-                    log.debug("DEFINITELY 9")
-                    digits_sum += magnitude * 9
+def note_count_reader(block: NDArray) -> int:
+    top_left = Point(x=1, y=1)
+    top_left_gap = Point(x=1, y=3)
+    bottom_right_gap = Point(x=14, y=12)
+    top_right_gap = Point(x=14, y=3)
+    bottom_left_gap = Point(x=1, y=10)
+    middle_top = Point(x=8, y=5)
+    middle_third_row_center = Point(x=10, y=9)
+    middle_middle = Point(x=10, y=8)
+    if is_white(block, top_left):
+        log.debug("MIGHT BE 2345")
+        if is_white(block, top_left_gap):
+            log.debug("MIGHT BE 45")
+            if is_white(block, top_right_gap):
+                log.debug("DEFINITELY 4")
+                return 4
             else:
                 log.debug("DEFINITELY 5")
-                digits_sum += magnitude * 5
-        elif is_black(read_pixel(digit_area, bottom_middle)):
-            log.debug("PROBABLY 128")
-            if is_black(read_pixel(digit_area, top_center)):
-                log.debug("PROBABLY 28")
-                if is_black(read_pixel(digit_area, bottom_right_curve)):
-                    log.debug("DEFINITELY 2")
-                    digits_sum += magnitude * 2
-                else:
-                    log.debug("DEFINITELY 8")
-                    digits_sum += magnitude * 8
-            else:
-                log.debug("DEFINITELY 1")
-                digits_sum += magnitude * 1
+                return 5
         else:
-            log.debug("PROBABLY 0467")
-            if not is_black(read_pixel(digit_area, top_right_curve)):
-                log.debug("PROBABLY 047")
-                if is_black(read_pixel(digit_area, top_point_of_four)):
-                    log.debug("PROBABLY 47")
-                    if is_black(read_pixel(digit_area, top_left_of_seven)):
-                        log.debug("DEFINITELY 7")
-                        digits_sum += magnitude * 7
-                    else:
-                        log.debug("DEFINITELY 4")
-                        digits_sum += magnitude * 4
+            log.debug("MIGHT BE 23")
+            if is_white(block, bottom_right_gap):
+                log.debug("DEFINITELY 3")
+                return 3
+            else:
+                log.debug("DEFINITELY 2")
+                return 2
+    else:
+        log.debug("MIGHT BE 678901_")
+        if is_white(block, top_right_gap):
+            log.debug("MIGHT BE 9780")
+            if is_white(block, bottom_left_gap):
+                log.debug("MIGHT BE 80")
+                if is_white(block, middle_middle):
+                    log.debug("DEFINITELY 8")
+                    return 8
                 else:
                     log.debug("DEFINITELY 0")
-                    digits_sum += magnitude * 0
-                pass
+                    return 0
             else:
-                log.debug("DEFINITELY 6")
-                digits_sum += magnitude * 6
-    return digits_sum
+                log.debug("MIGHT BE 79")
+                if is_white(block, middle_third_row_center):
+                    log.debug("DEFINITELY 9")
+                    return 9
+                else:
+                    log.debug("DEFINITELY 7")
+                    return 7
+        else:
+            log.debug("MIGHT BE 61_")
+            if is_white(block, middle_top):
+                log.debug("MIGHT BE 61")
+                if is_white(block, top_left_gap):
+                    log.debug("DEFINITELY 6")
+                    return 6
+                else:
+                    log.debug("DEFINITELY 1")
+                    return 1
+            else:
+                log.debug("DEFINITELY ' '")
+                return 0
+
+
+def update_video_processing_state(
+    frame: NDArray,
+    frame_count: int,
+    v: VideoProcessingState,
+    song_reference: SongReference,
+) -> None:
+    # total note count only exists on the score frame
+    if v.note_count is None:
+        v.note_count = get_note_count(frame)
+    if v.left_side is not None and v.is_double is not None:
+        if v.score is None:
+            v.score = get_score_from_result_screen(frame, v.left_side, v.is_double)
+        # only if no lookup for titles by song metadata have been determined
+        if (
+            v.difficulty
+            and v.level
+            and v.min_bpm
+            and v.max_bpm
+            and v.note_count
+            and (v.metadata_title is None or len(v.metadata_title) > 1)
+        ):
+            v.metadata_title = song_reference.resolve_by_play_metadata(
+                (v.difficulty, v.level),
+                (v.min_bpm, v.max_bpm),
+                v.note_count,
+            )
+        # if all score data is found but the frame is not saved
+        if (
+            v.ocr_song_title is not None
+            and v.score is not None
+            and v.score_frame is None
+        ):
+            v.score_frame = copy.deepcopy(frame)
+            # if CONSTANTS.DEV_MODE:
+            #    frame_utilities.dump_to_png(frame, state.name, frame_count)
+    return
+
+
+def handle_score_transition(
+    frame_count: int,
+    v: VideoProcessingState,
+    song_reference: SongReference,
+    session_uuid: str,
+) -> None:
+    if (
+        v.ocr_song_title is None
+        and v.ocr_song_future is not None
+        and v.ocr_song_future.done()
+    ):
+        v.ocr_song_title = v.ocr_song_future.result()
+        log.info("found ocr song title {v.ocr_song_title}")
+
+    if (
+        v.score is not None
+        and v.score_frame is not None
+        and v.ocr_song_title is not None
+        and v.difficulty is not None
+        and v.level is not None
+        and v.metadata_title is not None
+    ):
+        log.info(f"frame#{frame_count}:writing score")
+        sqlite_client.write_score(
+            session_uuid,
+            v.ocr_song_title,
+            v.score,
+            v.difficulty,
+            v.score_frame,
+            song_reference,
+            v.level,
+            v.metadata_title,
+        )
+    return
