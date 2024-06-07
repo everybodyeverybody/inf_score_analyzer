@@ -8,7 +8,7 @@ data = response.json()
 
 with open("checklist.csv", "wt") as writer:
     csv_writer = csv.writer(writer)
-    header = ["name", "difficulty", "normal", "hard"]
+    header = ["name", "difficulty", "normal", "n_value", "hard", "h_value"]
     csv_writer.writerow(header)
     for entry in data:
         row = [entry[key] for key in header]
