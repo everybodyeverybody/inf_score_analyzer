@@ -13,10 +13,12 @@ import cv2 as cv  # type: ignore
 
 # local imports
 from . import sqlite_client
+from . import frame_utilities
 from . import game_state_pixels
 from . import play_frame_processor
 from . import score_frame_processor
 from .game_state_frame_processor import get_game_state_from_frame
+from . import download_12sp_tables
 
 from . import constants as CONSTANTS
 from .local_dataclasses import (
@@ -38,6 +40,7 @@ def process_video(
     lookback = 90
     frame_count = 0
     v = VideoProcessingState()
+    score_frame_dumped = False
     while video.isOpened():
         frame_loaded, frame = video.read()
         if not frame_loaded:
@@ -48,7 +51,8 @@ def process_video(
         v.update_current_state(state)
         if frame_count % 300 == 0:
             log.info(f"frame#{frame_count} {v}")
-
+            if CONSTANTS.DEV_MODE and (frame_count % 3000 == 0):
+                frame_utilities.dump_to_png(frame, state.value, frame_count)
         if v.state_frame_count >= lookback:
             if v.current_state in game_state_pixels.PLAY_STATES:
                 play_frame_processor.update_video_processing_state(
@@ -58,6 +62,9 @@ def process_video(
                 score_frame_processor.update_video_processing_state(
                     frame, frame_count, v, song_reference
                 )
+                if not score_frame_dumped:
+                    frame_utilities.dump_to_png(frame, state.value, frame_count)
+                    score_frame_dumped = True
         elif (
             v.current_state == GameState.LOADING
             and v.previous_state in game_state_pixels.SCORE_STATES
@@ -67,6 +74,7 @@ def process_video(
             )
             log.info(f"frame#{frame_count}:unblocking naming and scoring")
             v = VideoProcessingState()
+            score_frame_dumped = False
         elif v.current_state == GameState.SONG_SELECT:
             if v.returned_to_song_select_before_writing():
                 log.warning(
@@ -75,6 +83,7 @@ def process_video(
                 )
                 log.info(f"frame#{frame_count}:unblocking naming and scoring")
                 v = VideoProcessingState()
+                score_frame_dumped = False
     return
 
 
@@ -203,6 +212,7 @@ def startup() -> tuple[list[Path], SongReference]:
     sqlite_client.sqlite_setup(args.force_update)
     song_reference = sqlite_client.read_song_data_from_db()
     png_paths = load_pngs(args.png_files)
+    download_12sp_tables.download_and_normalize_data(song_reference)
     return png_paths, song_reference
 
 

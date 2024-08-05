@@ -121,9 +121,19 @@ def populate_app_database():
         "(10,'DP_LEGGENDARIA'),"
         "(99,'UNKNOWN')"
     )
+    populate_alternate_difficulty_query = (
+        "insert or replace into alternate_difficulty_table("
+        "difficulty_table_id,"
+        "difficulty_table_url) "
+        "values (?,?)"
+    )
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     db_cursor = app_db_connection.cursor()
     db_cursor.execute(populate_difficulty_query)
+    db_cursor.execute(
+        populate_alternate_difficulty_query,
+        (CONSTANTS.COMMUNITY_RANK_TABLE_ID, CONSTANTS.COMMUNITY_RANK_TABLE_URL),
+    )
     app_db_connection.commit()
 
 
@@ -156,12 +166,28 @@ def create_app_database():
         "difficulty_id integer primary key,"
         "difficulty text)"
     )
-    create_alternate_song_difficulty_table_query = (
-        "create table if not exists alternate_song_difficulty("
+    create_alternate_difficulty_table_query = (
+        "create table if not exists alternate_difficulty_table("
+        "difficulty_table_id text,"
+        "difficulty_table_url text)"
+    )
+    create_alternate_difficulty_table_index_query = (
+        "create unique index if not exists alternate_difficulty_table_index "
+        "on alternate_difficulty_table(difficulty_table_id, difficulty_table_url)"
+    )
+    create_alternate_difficulty_table_songs_query = (
+        "create table if not exists alternate_difficulty_table_songs("
+        "difficulty_table_id text,"
         "textage_id text,"
         "difficulty_id integer,"
+        "clear_type integer, "
         "alternate_difficulty text,"
         "alternate_level text)"
+    )
+    create_alternate_difficulty_table_songs_index_query = (
+        "create unique index if not exists alternate_difficulty_table_songs_index "
+        "on alternate_difficulty_table_songs "
+        "( difficulty_table_id, textage_id, difficulty_id, clear_type)"
     )
     create_third_party_id_table = (
         "create table if not exists third_party_song_ids("
@@ -179,7 +205,10 @@ def create_app_database():
     db_cursor.execute(create_difficulty_table_query)
     db_cursor.execute(create_song_difficulty_table_query)
     db_cursor.execute(create_song_difficulty_index_query)
-    db_cursor.execute(create_alternate_song_difficulty_table_query)
+    db_cursor.execute(create_alternate_difficulty_table_query)
+    db_cursor.execute(create_alternate_difficulty_table_index_query)
+    db_cursor.execute(create_alternate_difficulty_table_songs_query)
+    db_cursor.execute(create_alternate_difficulty_table_songs_index_query)
     db_cursor.execute(create_third_party_id_table)
     db_cursor.execute(create_third_party_id_table_index)
 
@@ -528,3 +557,21 @@ def get_scores_by_session(session_id: str) -> list[tuple]:
     _ = db_cursor.execute(double_db, (str(CONSTANTS.USER_DB),))
     results = db_cursor.execute(query, (session_id,))
     return [result for result in results]
+
+
+def add_alternate_difficulty_table(table_entries: list[tuple]):
+    app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
+    app_db_cursor = app_db_connection.cursor()
+    query = (
+        "insert or replace into alternate_difficulty_table_songs("
+        "difficulty_table_id,"
+        "textage_id,"
+        "difficulty_id,"
+        "clear_type, "
+        "alternate_difficulty,"
+        "alternate_level) values "
+        "(?,?,?,?,?,?)"
+    )
+    for entry in table_entries:
+        app_db_cursor.execute(query, entry)
+    app_db_connection.commit()
