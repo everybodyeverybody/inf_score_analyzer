@@ -12,6 +12,7 @@ from .frame_utilities import (
     read_pixel,
     dump_to_png,
     get_numbers_from_area,
+    read_from_png,
 )
 from . import constants as CONSTANTS
 from .local_dataclasses import (
@@ -23,6 +24,7 @@ from .local_dataclasses import (
 )
 
 log = logging.getLogger(__name__)
+
 
 # TODO: future work
 # def __write_debug_files(frame: NDArray, frame_count: int, percentage: int) -> None:
@@ -471,6 +473,84 @@ def read_bpm(frame: NDArray, left_side: bool, is_double: bool) -> Tuple[int, int
     return min_bpm, max_bpm
 
 
+def play_judge_digit_reader(block: NDArray) -> int:
+    upper_left_edge = Point(x=3, y=4)
+    lower_left_edge = Point(x=3, y=8)
+    right_edge = Point(x=11, y=4)
+    center_center = Point(x=7, y=6)
+    top_center = Point(x=7, y=1)
+    if is_white(block, upper_left_edge):
+        log.debug("MIGHT BE 56890")
+        if is_white(block, right_edge):
+            log.debug("MIGHT BE 089")
+            if is_white(block, lower_left_edge):
+                log.debug("MIGHT BE 08")
+                if is_white(block, center_center):
+                    log.debug("DEFINITELY 8")
+                    return 8
+                else:
+                    log.debug("DEFINITELY 0")
+                    return 0
+            else:
+                log.debug("DEFINITELY 9")
+                return 9
+        else:
+            log.debug("MIGHT BE 56")
+            if is_white(block, lower_left_edge):
+                log.debug("DEFINITELY 6")
+                return 6
+            else:
+                log.debug("DEFINITELY 5")
+                return 5
+    else:
+        log.debug("MIGHT BE 12347_")
+        if is_white(block, right_edge):
+            log.debug("MIGHT BE 234")
+            if is_white(block, center_center):
+                log.debug("MIGHT BE 23")
+                if is_white(block, lower_left_edge):
+                    log.debug("DEFINITELY 2")
+                    return 2
+                else:
+                    log.debug("DEFINITELY 3")
+                    return 3
+            else:
+                log.debug("DEFINITELY 4")
+                return 4
+        else:
+            log.debug("MIGHT BE 17_")
+            if is_white(block, center_center):
+                log.debug("DEFINITELY 1")
+                return 1
+            else:
+                log.debug("MIGHT BE 7_")
+                if is_white(block, top_center):
+                    log.debug("DEFINITELY 7")
+                    return 7
+                else:
+                    log.debug("DEFINITELY _")
+                    return 0
+
+
+def read_play_judge_accuracy_area(play_frame_count: int, play_frame: NDArray):
+    # TODO: add 2p and doubles and alt arrangements
+    play_judge_accuracy_area = CONSTANTS.PLAY_JUDGE_SP_P1
+    play_judge_fast_area = CONSTANTS.PLAY_JUDGE_FAST_SP_P1
+    play_judge_slow_area = CONSTANTS.PLAY_JUDGE_SLOW_SP_P1
+    current_score = get_numbers_from_area(
+        play_frame, play_judge_accuracy_area, play_judge_digit_reader
+    )
+    current_fast = get_numbers_from_area(
+        play_frame, play_judge_fast_area, play_judge_digit_reader
+    )
+    current_slow = get_numbers_from_area(
+        play_frame, play_judge_slow_area, play_judge_digit_reader
+    )
+    print(f"current score: {current_score} {current_fast} {current_slow}")
+
+    pass
+
+
 def read_play_metadata(
     play_frame_count: int,
     play_frame: NDArray,
@@ -544,3 +624,12 @@ def update_video_processing_state(
             v.ocr_song_title = v.ocr_song_future.result()
             log.info("found ocr song title {v.ocr_song_title}")
     return
+
+
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+
+    logging.basicConfig(level=logging.DEBUG)
+    frame = read_from_png(Path(sys.argv[1]))
+    read_play_judge_accuracy_area(-1, frame)

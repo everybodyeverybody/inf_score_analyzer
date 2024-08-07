@@ -124,6 +124,36 @@ LEVEL_SP_P2 = NumberArea(
     name="LEVEL_SP_P2",
 )
 
+PLAY_JUDGE_SP_P1 = NumberArea(
+    start_x=630,
+    start_y=968,
+    x_offset=14,
+    y_offset=16,
+    rows=6,
+    digits_per_row=4,
+    name="PLAY_JUDGE_SP_P1",
+)
+
+PLAY_JUDGE_FAST_SP_P1 = NumberArea(
+    start_x=699,
+    start_y=1000,
+    x_offset=14,
+    y_offset=16,
+    rows=1,
+    digits_per_row=4,
+    name="PLAY_JUDGE_FAST_SP_P1",
+)
+
+PLAY_JUDGE_SLOW_SP_P1 = NumberArea(
+    start_x=699,
+    start_y=1048,
+    x_offset=14,
+    y_offset=16,
+    rows=1,
+    digits_per_row=4,
+    name="PLAY_JUDGE_SLOW_SP_P1",
+)
+
 
 SCORE_DIGIT_X_OFFSET = 28
 SCORE_DIGIT_Y_OFFSET = 28
