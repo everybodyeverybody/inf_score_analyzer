@@ -154,6 +154,26 @@ PLAY_JUDGE_SLOW_SP_P1 = NumberArea(
     name="PLAY_JUDGE_SLOW_SP_P1",
 )
 
+PERCENTAGE_TENS_SP_1P = NumberArea(
+    start_x=379,
+    start_y=867,
+    x_offset=40,
+    y_offset=26,
+    rows=1,
+    digits_per_row=2,
+    name="PERCENTAGE_TENS_SP_1P",
+)
+
+PERCENTAGE_HUNDREDS_SP_1P = NumberArea(
+    start_x=363,
+    start_y=867,
+    x_offset=16,
+    y_offset=26,
+    rows=1,
+    digits_per_row=1,
+    name="PERCENTAGE_HUNDREDS_SP_1P",
+)
+
 
 SCORE_DIGIT_X_OFFSET = 28
 SCORE_DIGIT_Y_OFFSET = 28

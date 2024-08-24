@@ -48,110 +48,77 @@ log = logging.getLogger(__name__)
 #
 
 
-def lifebar_digit_reader(block: NDArray) -> str:
-    top_mid = Point(y=1, x=12)
-    mid_top = Point(y=7, x=12)
-    mid1 = Point(y=8, x=12)
-    mid_left = Point(y=9, x=2)
-    mid2 = Point(y=9, x=12)
-    bottom_left = Point(y=15, x=2)
-    top_right = Point(y=2, x=21)
-    if is_white(block, mid1):
-        log.debug("MIGHT BE 123568")
-        if is_white(block, mid_top):
-            log.debug("MIGHT BE 1568")
-            if is_white(block, top_right):
-                log.debug("MIGHT BE 58")
-                if is_white(block, mid_left):
+def percentage_tens_reader(block: NDArray) -> int:
+    bottom_left_corner = Point(y=21, x=5)
+    bottom_left_gap = Point(y=17, x=5)
+    top_left_gap = Point(y=8, x=5)
+    center_upper = Point(y=12, x=18)
+    center_lower = Point(y=14, x=18)
+    top_right_corner = Point(y=4, x=31)
+    top_middle = Point(y=4, x=18)
+    if is_white(block, bottom_left_corner):
+        log.debug("PROBABLY 023568")
+        if is_white(block, bottom_left_gap):
+            log.debug("PROBABLY 0268")
+            if is_white(block, center_upper):
+                log.debug("PROBABLY 268")
+                if not is_white(block, top_right_corner):
+                    log.debug("DEFINITELY 6")
+                    return 6
+                elif is_white(block, top_left_gap):
                     log.debug("DEFINITELY 8")
-                    return "8"
+                    return 8
                 else:
-                    log.debug("DEFINITELY 5")
-                    return "5"
-            elif is_white(block, mid_left):
-                log.debug("DEFINITELY 6")
-                return "6"
+                    log.debug("DEFINITELY 2")
+                    return 2
             else:
-                log.debug("DEFINITELY 1")
-                return "1"
+                log.debug("DEFINITELY 0")
+                return 0
         else:
-            log.debug("MIGHT BE 23")
-            if is_white(block, mid_left):
-                log.debug("DEFINITELY 2")
-                return "2"
+            log.debug("PROBABLY 35")
+            if is_white(block, top_left_gap):
+                log.debug("DEFINITELY 5")
+                return 5
             else:
                 log.debug("DEFINITELY 3")
-                return "3"
+                return 3
     else:
-        log.debug("MIGHT BE 0479_")
-        if is_white(block, mid2):
-            log.debug("MIGHT BE 49")
-            if is_white(block, top_mid):
+        log.debug("PROBABLY 1479")
+        if is_white(block, top_middle):
+            log.debug("PROBABLY 179")
+            if not is_white(block, top_left_gap):
+                log.debug("DEFINITELY 1")
+                return 1
+            elif is_white(block, center_lower):
                 log.debug("DEFINITELY 9")
-                return "9"
+                return 9
             else:
-                log.debug("DEFINITELY 9")
-                return "4"
-        else:
-            log.debug("MIGHT BE 07_")
-            if is_white(block, bottom_left):
-                log.debug("DEFINITELY 0")
-                return "0"
-            elif is_white(block, top_mid):
                 log.debug("DEFINITELY 7")
-                return "7"
-            else:
-                log.debug("DEFINITELY _")
-                return " "
+                return 7
+        else:
+            log.debug("DEFINITELY 4")
+            return 4
+    return 0
 
 
-def get_percentage_from_percentage_area(
-    frame: NDArray, origin: Point, x_offset: int, y_offset: int
-) -> int:
-    hundreds = Point(y=580, x=240)
-    hundreds_color = read_pixel(frame, hundreds)
-    if (
-        hundreds_color[0] >= CONSTANTS.QUANTIZED_WHITE_MAX
-        and hundreds_color[1] >= CONSTANTS.QUANTIZED_WHITE_MAX
-        and hundreds_color[2] >= CONSTANTS.QUANTIZED_WHITE_MAX
-    ):
-        return 100
-    places_count = 2
-    digits = []
-    for place in range(0, places_count):
-        column_offset = place * x_offset
-        top_left_with_offset = origin.x + column_offset
-        bottom_right_with_offset = top_left_with_offset + x_offset
-        top_left = Point(y=origin.y, x=top_left_with_offset)
-        bottom_right = Point(y=origin.y + y_offset, x=bottom_right_with_offset)
-        log.debug(f"TOP LEFT {top_left} BOTTOM_RIGHT {bottom_right}")
-        digit_block = get_rectanglular_subsection_from_frame(
-            frame, top_left.y, top_left.x, bottom_right.y, bottom_right.x
-        )
-        digits.append(lifebar_digit_reader(digit_block))
-    log.debug(f"PERC {digits}")
-    percentage_string = "".join(digits).strip()
-    if percentage_string == "":
-        return 0
-    return int(percentage_string)
+def percentage_hundreds_reader(block: NDArray) -> int:
+    top_one = Point(y=3, x=4)
+    if is_white(block, top_one):
+        log.debug("MUST BE 1")
+        return 1
+    log.debug("MUST BE 0")
+    return 0
 
 
-def get_percentage_area_origin(left_side: bool, is_double: bool) -> Point:
-    if left_side and not is_double:
-        return Point(y=572, x=246)
-    else:
-        # TODO: future work
-        raise RuntimeError("2p is not implemented")
-
-
-def get_lifebar_percentage(frame: NDArray, left_side: bool, is_double: bool) -> int:
-    percentage_area_origin = get_percentage_area_origin(left_side, is_double)
-    return get_percentage_from_percentage_area(
-        frame,
-        percentage_area_origin,
-        CONSTANTS.PERCENTAGE_DIGIT_X_OFFSET,
-        CONSTANTS.PERCENTAGE_DIGIT_Y_OFFSET,
-    )
+def read_lifebar_percentage(frame_count: int, frame: NDArray) -> int:
+    # TODO: add 2p and doubles and alternative layouts
+    hundreds_area = CONSTANTS.PERCENTAGE_HUNDREDS_SP_1P
+    tens_area = CONSTANTS.PERCENTAGE_TENS_SP_1P
+    hundred = get_numbers_from_area(frame, hundreds_area, percentage_hundreds_reader)[0]
+    tens = get_numbers_from_area(frame, tens_area, percentage_tens_reader)[0]
+    percent_value: int = tens + (hundred * 100)
+    log.debug(f"PERCENT VALUE: {percent_value}")
+    return percent_value
 
 
 def get_ocr_song_title_from_play_frame(
@@ -633,3 +600,4 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     frame = read_from_png(Path(sys.argv[1]))
     read_play_judge_accuracy_area(-1, frame)
+    read_lifebar_percentage(-1, frame)
