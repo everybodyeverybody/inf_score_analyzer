@@ -499,23 +499,27 @@ def play_judge_digit_reader(block: NDArray) -> int:
                     return 0
 
 
-def read_play_judge_accuracy_area(play_frame_count: int, play_frame: NDArray):
+def read_play_judge_accuracy_area(
+    play_frame_count: int, play_frame: NDArray
+) -> list[int]:
     # TODO: add 2p and doubles and alt arrangements
     play_judge_accuracy_area = CONSTANTS.PLAY_JUDGE_SP_P1
     play_judge_fast_area = CONSTANTS.PLAY_JUDGE_FAST_SP_P1
     play_judge_slow_area = CONSTANTS.PLAY_JUDGE_SLOW_SP_P1
-    current_score = get_numbers_from_area(
-        play_frame, play_judge_accuracy_area, play_judge_digit_reader
+    # [fg, gr, g, b, p, cb, fast, slow]
+    score_and_accuracy: list[int] = []
+    score_and_accuracy.extend(
+        get_numbers_from_area(
+            play_frame, play_judge_accuracy_area, play_judge_digit_reader
+        )
     )
-    current_fast = get_numbers_from_area(
-        play_frame, play_judge_fast_area, play_judge_digit_reader
+    score_and_accuracy.extend(
+        get_numbers_from_area(play_frame, play_judge_fast_area, play_judge_digit_reader)
     )
-    current_slow = get_numbers_from_area(
-        play_frame, play_judge_slow_area, play_judge_digit_reader
+    score_and_accuracy.extend(
+        get_numbers_from_area(play_frame, play_judge_slow_area, play_judge_digit_reader)
     )
-    print(f"current score: {current_score} {current_fast} {current_slow}")
-
-    pass
+    return score_and_accuracy
 
 
 def read_play_metadata(
@@ -597,7 +601,9 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
 
-    logging.basicConfig(level=logging.DEBUG)
+    # logging.basicConfig(level=logging.DEBUG)
     frame = read_from_png(Path(sys.argv[1]))
-    read_play_judge_accuracy_area(-1, frame)
-    read_lifebar_percentage(-1, frame)
+    score_and_accuracy = read_play_judge_accuracy_area(-1, frame)
+    lifebar_percentage = read_lifebar_percentage(-1, frame)
+    score_and_accuracy.append(lifebar_percentage)
+    print(score_and_accuracy)
