@@ -545,6 +545,46 @@ def get_all_song_metadata() -> dict[str, SongMetadata]:
     return _build_song_metadata_dict(version_data, song_titles, validated_songs)
 
 
+def generate_chart_urls() -> dict[str, list[tuple[str, str]]]:
+    chart_urls: dict[str, list[tuple[str, str]]] = {}
+    DIFF_TO_TEXTAGE_MAP = {
+        Difficulty.SP_NORMAL: "N",
+        Difficulty.SP_HYPER: "H",
+        Difficulty.SP_ANOTHER: "A",
+        Difficulty.SP_LEGGENDARIA: "X",
+        Difficulty.DP_NORMAL: "N",
+        Difficulty.DP_HYPER: "H",
+        Difficulty.DP_ANOTHER: "A",
+        Difficulty.DP_LEGGENDARIA: "X",
+    }
+    DIFF_TO_HEX = {10: "A", 11: "B", 12: "C"}
+    SIDE_TO_MAP = {"1P": "1", "2P": "2", "DP": "D"}
+    BASE_URL = "https://textage.cc/score"
+    for textage_id, song_metadata in sorted(get_all_song_metadata().items()):
+        if textage_id not in chart_urls:
+            chart_urls[textage_id] = []
+        for difficulty, diff_metadata in song_metadata.difficulty_metadata.items():
+            if diff_metadata.level >= 10:
+                level = DIFF_TO_HEX[diff_metadata.level]
+            else:
+                level = f"{diff_metadata.level}"
+            diff = DIFF_TO_TEXTAGE_MAP[difficulty]
+            diff_and_level = f"{diff}{level}00"
+            version = song_metadata.textage_version_id
+            for side, side_char in SIDE_TO_MAP.items():
+                label = f"{song_metadata.title} {side} {difficulty}"
+                url = f"{BASE_URL}/{version}/{textage_id}.html?{side_char}{diff_and_level}"
+                data: tuple[str, str] = (
+                    url,
+                    label,
+                )
+                chart_urls[textage_id].append(data)
+    return chart_urls
+
+
 if __name__ == "__main__":
-    for key, value in sorted(get_all_song_metadata().items()):
-        print(value.to_dict())
+    for key, values in generate_chart_urls().items():
+        for url, label in values:
+            print(f"{url} # {label}")
+#    for key, value in sorted(get_all_song_metadata().items()):
+#        print(value.to_dict())
