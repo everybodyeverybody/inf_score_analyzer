@@ -147,7 +147,7 @@ class SongMetadata:
             "title": self.title,
             "artist": self.artist,
             "genre": self.genre,
-            "textage_version_id": self.version,
+            "textage_version_id": self.textage_version_id,
             "version": self.version,
             "alphanumeric": self.alphanumeric.name,
             "difficulty_metadata": {
