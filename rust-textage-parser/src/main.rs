@@ -12,7 +12,7 @@ struct TextageJSParser {
     cache_filename: String,
     start_regex: Regex,
     end_regex: Regex,
-    file_specific_regexes: Vec<Regex>,
+    file_specific_regexes: Vec<(Regex, String)>,
     is_list_not_map: bool,
 }
 
@@ -229,12 +229,45 @@ fn check_textage_metadata_files(js: &TextageJSParser) -> PathBuf {
 }
 
 fn setup_config() -> Vec<TextageJSParser> {
+    let mut song_and_diff_regexes: Vec<(Regex, String)> = vec![];
+    // remove comments from song and difficulty js
+    song_and_diff_regexes.push((Regex::new("A").unwrap(), String::from("10")));
+    song_and_diff_regexes.push((Regex::new("B").unwrap(), String::from("11")));
+    song_and_diff_regexes.push((Regex::new("C").unwrap(), String::from("12")));
+    song_and_diff_regexes.push((Regex::new("D").unwrap(), String::from("13")));
+    song_and_diff_regexes.push((Regex::new("E").unwrap(), String::from("14")));
+    song_and_diff_regexes.push((Regex::new("F").unwrap(), String::from("15")));
+    song_and_diff_regexes.push((Regex::new(r"//\d+").unwrap(), String::from("")));
+    // remove html from song and difficulty js
+    song_and_diff_regexes.push((Regex::new(",\"<span.*span>\"").unwrap(), String::from("")));
+
+    let mut song_title_regexes: Vec<(Regex, String)> = vec![];
+    // there is a lot of extra html encoded in the song titles
+    // so we strip all of it with these
+    // TODO: set all the replace characters on these
+    song_title_regexes.push((Regex::new(r".fontcolor\(.*?\)").unwrap(), String::from("")));
+    song_title_regexes.push((Regex::new("<span style='.*?'>").unwrap(), String::from("")));
+    song_title_regexes.push((Regex::new(r"<\\/span>").unwrap(), String::from("")));
+    song_title_regexes.push((Regex::new(r"<div class=.*?>").unwrap(), String::from("")));
+    song_title_regexes.push((Regex::new(r"<\\/div>").unwrap(), String::from("")));
+    song_title_regexes.push((Regex::new(r"<br>").unwrap(), String::from("")));
+    song_title_regexes.push((Regex::new(r"<b>").unwrap(), String::from("")));
+    song_title_regexes.push((Regex::new(r"<\\/b>").unwrap(), String::from("")));
+    song_title_regexes.push((Regex::new(r"^\[SS").unwrap(), String::from("[-1")));
+    song_title_regexes.push((Regex::new(r"\t").unwrap(), String::from("")));
+
+    let mut version_title_regexes: Vec<(Regex, String)> = vec![];
+    // we're pulling a list thats declared as a js array, remove the semicolon
+    version_title_regexes.push((Regex::new(";").unwrap(), String::from("")));
+    version_title_regexes.push((Regex::new("]$").unwrap(), String::from("")));
+    version_title_regexes.push((Regex::new(r"vertbl\[35\]=").unwrap(), String::from(",")));
+
     let song_difficulty_and_version_js = TextageJSParser {
         http_filename: String::from("actbl.js"),
         cache_filename: String::from("actbl.js.parsed.json"),
         start_regex: Regex::new(r"^\s*actbl=(\{).*$").unwrap(),
         end_regex: Regex::new(r"\s*}\s*;\s*").unwrap(),
-        file_specific_regexes: vec![],
+        file_specific_regexes: song_and_diff_regexes,
         is_list_not_map: false,
     };
 
@@ -252,8 +285,8 @@ fn setup_config() -> Vec<TextageJSParser> {
         cache_filename: String::from("titletbl.js.parsed.json"),
         start_regex: Regex::new(r"^\s*titletbl=(\{).*$").unwrap(),
         end_regex: Regex::new(r"\s*}\s*;\s*").unwrap(),
-        file_specific_regexes: vec![],
-        is_list_not_map: true,
+        file_specific_regexes: song_title_regexes,
+        is_list_not_map: false,
     };
 
     let mut v: Vec<TextageJSParser> = Vec::new();
