@@ -1,15 +1,19 @@
 use regex::Regex;
 use reqwest;
+use serde_json::Value;
 use std::fs;
 use std::fs::File;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
 #[derive(Debug)]
-struct TextageJS {
-    filename: String,
+struct TextageJSParser {
+    http_filename: String,
+    cache_filename: String,
     start_regex: Regex,
     end_regex: Regex,
+    file_specific_regexes: Vec<Regex>,
+    is_list_not_map: bool,
 }
 
 #[derive(Debug)]
@@ -54,14 +58,19 @@ fn precompile_regexes() -> PrecompiledRegexes {
 
 // TODO: figure out where this should go
 #[tokio::main]
-async fn download_textage_javascript(filename: &str) -> Result<String, reqwest::Error> {
-    let textage_base_url = format!("https://textage.cc/score/{}", filename);
+async fn download_textage_javascript(http_filename: &str) -> Result<String, reqwest::Error> {
+    let textage_base_url = format!("https://textage.cc/score/{}", http_filename);
     println!("downloading from {}", textage_base_url);
     let response = reqwest::get(textage_base_url)
         .await?
         .text_with_charset("Shift_JIS")
         .await?;
     return Ok(response);
+}
+
+fn parse_javascript(line: &str, regexes: &Vec<Regex>, is_dict_not_list: bool) -> String {
+    // TODO: abstract over the regexes
+    return String::from("");
 }
 
 fn parse_song_difficulty_and_version_js(line: &str, regexes: &PrecompiledRegexes) -> String {
@@ -106,9 +115,9 @@ fn parse_version_index_js(line: &str, regexes: &PrecompiledRegexes) -> String {
 }
 
 // TODO: this should probably be async
-fn download_and_parse_textage_javascript(js: &TextageJS, target_path: &PathBuf) -> PathBuf {
+fn download_and_parse_textage_javascript(js: &TextageJSParser, target_path: &PathBuf) -> PathBuf {
     println!("download and parse");
-    let javascript = download_textage_javascript(&js.filename).unwrap();
+    let javascript = download_textage_javascript(&js.http_filename).unwrap();
     let lines = javascript.lines();
     let mut capture_output = false;
     let mut valid_data: Vec<String> = Vec::new();
@@ -139,18 +148,18 @@ fn download_and_parse_textage_javascript(js: &TextageJS, target_path: &PathBuf) 
                     end_char = String::from("]");
                 }
                 valid_data.push(end_char);
-                println!("{} stopping at {}", js.filename, line);
+                println!("{} stopping at {}", js.http_filename, line);
                 break;
             } else {
                 if skip_comments.is_match(line) || skip_blanks.is_match(line) {
                     continue;
                 }
                 let special_parsed_line;
-                if js.filename == "actbl.js" {
+                if js.http_filename == "actbl.js" {
                     special_parsed_line = parse_song_difficulty_and_version_js(&line, &regexes);
-                } else if js.filename == "scrlist.js" {
+                } else if js.http_filename == "scrlist.js" {
                     special_parsed_line = parse_version_index_js(&line, &regexes);
-                } else if js.filename == "titletbl.js" {
+                } else if js.http_filename == "titletbl.js" {
                     special_parsed_line = parse_song_titles_js(&line, &regexes);
                 } else {
                     special_parsed_line = String::from(line)
@@ -160,14 +169,18 @@ fn download_and_parse_textage_javascript(js: &TextageJS, target_path: &PathBuf) 
         }
     }
 
+    let valid_data_w_newlines = valid_data.join("\n");
+    let a: Value = serde_json::from_str(&valid_data_w_newlines).unwrap();
+    println!("{:?}", a);
+
     _ = File::create(&target_path).unwrap();
-    fs::write(&target_path, valid_data.join("\n")).expect("");
+    fs::write(&target_path, valid_data_w_newlines).expect("");
     let mut return_path = PathBuf::new();
-    return_path.push(target_path);
+    return_path.push(&target_path);
     return return_path;
 }
 
-fn cache_exists_and_is_valid(cache_dir: &str, filename: &str) -> bool {
+fn cache_exists_and_is_valid(cache_dir: &str, http_filename: &str) -> bool {
     // TODO: change this to result based stuff
     // this assumes a fs-based cache
     let cache_dir = PathBuf::from(cache_dir);
@@ -178,7 +191,7 @@ fn cache_exists_and_is_valid(cache_dir: &str, filename: &str) -> bool {
     }
     let mut cache_file = PathBuf::new();
     cache_file.push(cache_dir);
-    cache_file.push(filename);
+    cache_file.push(http_filename);
     let cache_exists = std::fs::exists(cache_file.as_path()).unwrap();
     if !cache_exists {
         return false;
@@ -199,13 +212,13 @@ fn cache_exists_and_is_valid(cache_dir: &str, filename: &str) -> bool {
     return false;
 }
 
-fn check_textage_metadata_files(js: &TextageJS) -> PathBuf {
+fn check_textage_metadata_files(js: &TextageJSParser) -> PathBuf {
     println!("check textage metadata file");
+    // TODO: make this a config/global
     let cache_dir = String::from("./textage-data");
-    let local_parsed_filename = format!("{}.parsed.json", js.filename);
-    let cache_ok = cache_exists_and_is_valid(&cache_dir, &local_parsed_filename);
+    let cache_ok = cache_exists_and_is_valid(&cache_dir, &js.cache_filename);
     let mut cached_filepath = PathBuf::from(cache_dir);
-    cached_filepath.push(local_parsed_filename);
+    cached_filepath.push(&js.cache_filename);
     if cache_ok {
         println!("cache ok");
         return cached_filepath;
@@ -215,26 +228,35 @@ fn check_textage_metadata_files(js: &TextageJS) -> PathBuf {
     }
 }
 
-fn setup_config() -> Vec<TextageJS> {
-    let song_difficulty_and_version_js = TextageJS {
-        filename: String::from("actbl.js"),
+fn setup_config() -> Vec<TextageJSParser> {
+    let song_difficulty_and_version_js = TextageJSParser {
+        http_filename: String::from("actbl.js"),
+        cache_filename: String::from("actbl.js.parsed.json"),
         start_regex: Regex::new(r"^\s*actbl=(\{).*$").unwrap(),
         end_regex: Regex::new(r"\s*}\s*;\s*").unwrap(),
+        file_specific_regexes: vec![],
+        is_list_not_map: false,
     };
 
-    let version_index_js = TextageJS {
-        filename: String::from("scrlist.js"),
+    let version_index_js = TextageJSParser {
+        http_filename: String::from("scrlist.js"),
+        cache_filename: String::from("scrlist.js.parsed.json"),
         start_regex: Regex::new(r"^vertbl\s*=\s*(\[)(.*)$").unwrap(),
         end_regex: Regex::new(r"^\s*$").unwrap(),
+        file_specific_regexes: vec![],
+        is_list_not_map: true,
     };
 
-    let song_titles_js = TextageJS {
-        filename: String::from("titletbl.js"),
+    let song_titles_js = TextageJSParser {
+        http_filename: String::from("titletbl.js"),
+        cache_filename: String::from("titletbl.js.parsed.json"),
         start_regex: Regex::new(r"^\s*titletbl=(\{).*$").unwrap(),
         end_regex: Regex::new(r"\s*}\s*;\s*").unwrap(),
+        file_specific_regexes: vec![],
+        is_list_not_map: true,
     };
 
-    let mut v: Vec<TextageJS> = Vec::new();
+    let mut v: Vec<TextageJSParser> = Vec::new();
     v.push(song_difficulty_and_version_js);
     v.push(version_index_js);
     v.push(song_titles_js);
@@ -246,6 +268,6 @@ fn main() {
     let js_config = setup_config();
     for config in &js_config {
         println!("config {:?}", config);
-        check_textage_metadata_files(&config);
+        let filepath = check_textage_metadata_files(&config);
     }
 }
