@@ -1,9 +1,17 @@
 use regex::Regex;
 use reqwest;
+use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::path::PathBuf;
 use std::time::SystemTime;
+
+#[derive(Debug)]
+enum TextageJSType {
+    Difficulties,
+    Versions,
+    Titles,
+}
 
 #[derive(Debug)]
 struct TextageJSParser {
@@ -13,6 +21,7 @@ struct TextageJSParser {
     end_regex: Regex,
     file_specific_regexes: Vec<(Regex, String)>,
     is_list_not_map: bool,
+    js_type: TextageJSType,
 }
 
 // TODO: figure out where this should go
@@ -158,7 +167,11 @@ fn setup_config() -> Vec<TextageJSParser> {
     song_and_diff_regexes.push((Regex::new("D").unwrap(), String::from("13")));
     song_and_diff_regexes.push((Regex::new("E").unwrap(), String::from("14")));
     song_and_diff_regexes.push((Regex::new("F").unwrap(), String::from("15")));
-    song_and_diff_regexes.push((Regex::new(r"//\d+").unwrap(), String::from("")));
+    // there are comment strings with ids inside the json, remove them
+    song_and_diff_regexes.push((Regex::new(r#"//\d+"#).unwrap(), String::from("")));
+    // there are quoted strings as the last entry in the difficulty array, convert them to
+    // -1 since we don't use them
+    song_and_diff_regexes.push((Regex::new(r#"".*"]"#).unwrap(), String::from("-1]")));
     // remove html from song and difficulty js
     song_and_diff_regexes.push((Regex::new(",\"<span.*span>\"").unwrap(), String::from("")));
 
@@ -190,6 +203,7 @@ fn setup_config() -> Vec<TextageJSParser> {
         end_regex: Regex::new(r"\s*}\s*;\s*").unwrap(),
         file_specific_regexes: song_and_diff_regexes,
         is_list_not_map: false,
+        js_type: TextageJSType::Difficulties,
     };
 
     let version_index_js = TextageJSParser {
@@ -199,6 +213,7 @@ fn setup_config() -> Vec<TextageJSParser> {
         end_regex: Regex::new(r"^\s*$").unwrap(),
         file_specific_regexes: version_title_regexes,
         is_list_not_map: true,
+        js_type: TextageJSType::Versions,
     };
 
     let song_titles_js = TextageJSParser {
@@ -208,6 +223,7 @@ fn setup_config() -> Vec<TextageJSParser> {
         end_regex: Regex::new(r"\s*}\s*;\s*").unwrap(),
         file_specific_regexes: song_title_regexes,
         is_list_not_map: false,
+        js_type: TextageJSType::Titles,
     };
 
     let mut v: Vec<TextageJSParser> = Vec::new();
@@ -217,13 +233,23 @@ fn setup_config() -> Vec<TextageJSParser> {
     return v;
 }
 
+fn read_difficulties(file: &PathBuf) {}
+fn read_titles(file: &PathBuf) {}
+fn read_versions(file: &PathBuf) {}
+
 fn deserialize_textage_data() {
     let js_config = setup_config();
     let cache_dir = String::from("./textage-data");
+    let song_and_difficulty: HashMap<String, Vec<i32>> = HashMap::new();
+    let mut versions;
     for config in &js_config {
         println!("config {:?}", config);
-        // TODO: serialize this into something so i can use it
-        let _ = check_textage_metadata_files(&config, &cache_dir);
+        let file = check_textage_metadata_files(&config, &cache_dir);
+        match config.js_type {
+            TextageJSType::Difficulties => read_difficulties(&file),
+            TextageJSType::Versions => versions = read_versions(&file),
+            TextageJSType::Titles => read_titles(&file),
+        }
     }
 }
 
