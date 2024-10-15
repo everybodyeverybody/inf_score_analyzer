@@ -1,8 +1,11 @@
 use regex::Regex;
 use reqwest;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::error::Error;
 use std::fs;
 use std::fs::File;
+use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -11,6 +14,13 @@ enum TextageJSType {
     Difficulties,
     Versions,
     Titles,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum StringOrInteger {
+    String(String),
+    Integer(i16),
 }
 
 #[derive(Debug)]
@@ -60,8 +70,6 @@ fn parse_javascript(line: &str, regexes: &Vec<(Regex, String)>, is_list_not_map:
 }
 
 fn cache_exists_and_is_valid(cache_dir: &str, http_filename: &str) -> bool {
-    // TODO: change this to result based stuff
-    // this assumes a fs-based cache
     let cache_dir = PathBuf::from(cache_dir);
     let max_cache_age: f32 = 86400.0 * 2.0;
     if !std::fs::exists(cache_dir.as_path()).unwrap() {
@@ -81,10 +89,10 @@ fn cache_exists_and_is_valid(cache_dir: &str, http_filename: &str) -> bool {
         .modified()
         .unwrap();
     let cache_age = now.duration_since(cache_time).unwrap().as_secs_f32();
-    println!(
-        "now {:?} cache time {:?} age {:?}",
-        now, cache_time, cache_age
-    );
+    //println!(
+    //    "now {:?} cache time {:?} age {:?}",
+    //    now, cache_time, cache_age
+    //);
     if cache_age < max_cache_age {
         return true;
     }
@@ -233,22 +241,43 @@ fn setup_config() -> Vec<TextageJSParser> {
     return v;
 }
 
-fn read_difficulties(file: &PathBuf) {}
-fn read_titles(file: &PathBuf) {}
-fn read_versions(file: &PathBuf) {}
+fn read_difficulties(file: &PathBuf) -> Result<HashMap<String, Vec<i8>>, Box<dyn Error>> {
+    let filehandle = File::open(file)?;
+    let reader = BufReader::new(&filehandle);
+    let x: HashMap<String, Vec<i8>> = serde_json::from_reader(reader)?;
+    return Ok(x);
+}
+fn read_titles(file: &PathBuf) -> Result<HashMap<String, Vec<StringOrInteger>>, Box<dyn Error>> {
+    let filehandle = File::open(file)?;
+    let reader = BufReader::new(&filehandle);
+    let x: HashMap<String, Vec<StringOrInteger>> = serde_json::from_reader(reader)?;
+    return Ok(x);
+}
+fn read_versions(file: &PathBuf) -> Result<Vec<String>, Box<dyn Error>> {
+    let filehandle = File::open(file)?;
+    let reader = BufReader::new(&filehandle);
+    let x: Vec<String> = serde_json::from_reader(reader)?;
+    return Ok(x);
+}
 
 fn deserialize_textage_data() {
     let js_config = setup_config();
     let cache_dir = String::from("./textage-data");
-    let song_and_difficulty: HashMap<String, Vec<i32>> = HashMap::new();
-    let mut versions;
+    let mut song_and_difficulty: HashMap<String, Vec<i8>>;
+    let mut titles: HashMap<String, Vec<StringOrInteger>>;
+    let mut versions: Vec<String>;
     for config in &js_config {
-        println!("config {:?}", config);
         let file = check_textage_metadata_files(&config, &cache_dir);
         match config.js_type {
-            TextageJSType::Difficulties => read_difficulties(&file),
-            TextageJSType::Versions => versions = read_versions(&file),
-            TextageJSType::Titles => read_titles(&file),
+            TextageJSType::Difficulties => {
+                song_and_difficulty = read_difficulties(&file).unwrap();
+            }
+            TextageJSType::Versions => {
+                versions = read_versions(&file).unwrap();
+            }
+            TextageJSType::Titles => {
+                titles = read_titles(&file).unwrap();
+            }
         }
     }
 }
