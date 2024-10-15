@@ -241,19 +241,30 @@ fn setup_config() -> Vec<TextageJSParser> {
     return v;
 }
 
+fn merge_data(
+    titles: &HashMap<String, Vec<StringOrInteger>>,
+    difficulties: &HashMap<String, Vec<i8>>,
+) {
+    for (textage_id, title_info) in titles {
+        let title = title_info.get(5);
+        let song_difficulty = difficulties.get(textage_id);
+        // TODO: generate a giant lookup that can then be fed into a url generating method
+    }
+}
+
 fn deserialize_textage_data() {
     let js_config = setup_config();
     let cache_dir = String::from("./textage-data");
-    let mut song_and_difficulty: HashMap<String, Vec<i8>>;
-    let mut titles: HashMap<String, Vec<StringOrInteger>>;
-    let mut versions: Vec<String>;
+    let mut difficulties: HashMap<String, Vec<i8>> = HashMap::new();
+    let mut titles: HashMap<String, Vec<StringOrInteger>> = HashMap::new();
+    let mut versions: Vec<String> = vec![];
     for config in &js_config {
         let file = check_textage_metadata_files(&config, &cache_dir);
         let filehandle = File::open(&file).unwrap();
         let reader = BufReader::new(&filehandle);
         match config.js_type {
             TextageJSType::Difficulties => {
-                song_and_difficulty = serde_json::from_reader(reader).unwrap();
+                difficulties = serde_json::from_reader(reader).unwrap();
             }
             TextageJSType::Versions => {
                 versions = serde_json::from_reader(reader).unwrap();
@@ -263,6 +274,7 @@ fn deserialize_textage_data() {
             }
         }
     }
+    merge_data(&titles, &difficulties);
 }
 
 fn main() {
