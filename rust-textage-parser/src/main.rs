@@ -241,25 +241,6 @@ fn setup_config() -> Vec<TextageJSParser> {
     return v;
 }
 
-fn read_difficulties(file: &PathBuf) -> Result<HashMap<String, Vec<i8>>, Box<dyn Error>> {
-    let filehandle = File::open(file)?;
-    let reader = BufReader::new(&filehandle);
-    let x: HashMap<String, Vec<i8>> = serde_json::from_reader(reader)?;
-    return Ok(x);
-}
-fn read_titles(file: &PathBuf) -> Result<HashMap<String, Vec<StringOrInteger>>, Box<dyn Error>> {
-    let filehandle = File::open(file)?;
-    let reader = BufReader::new(&filehandle);
-    let x: HashMap<String, Vec<StringOrInteger>> = serde_json::from_reader(reader)?;
-    return Ok(x);
-}
-fn read_versions(file: &PathBuf) -> Result<Vec<String>, Box<dyn Error>> {
-    let filehandle = File::open(file)?;
-    let reader = BufReader::new(&filehandle);
-    let x: Vec<String> = serde_json::from_reader(reader)?;
-    return Ok(x);
-}
-
 fn deserialize_textage_data() {
     let js_config = setup_config();
     let cache_dir = String::from("./textage-data");
@@ -268,15 +249,17 @@ fn deserialize_textage_data() {
     let mut versions: Vec<String>;
     for config in &js_config {
         let file = check_textage_metadata_files(&config, &cache_dir);
+        let filehandle = File::open(&file).unwrap();
+        let reader = BufReader::new(&filehandle);
         match config.js_type {
             TextageJSType::Difficulties => {
-                song_and_difficulty = read_difficulties(&file).unwrap();
+                song_and_difficulty = serde_json::from_reader(reader).unwrap();
             }
             TextageJSType::Versions => {
-                versions = read_versions(&file).unwrap();
+                versions = serde_json::from_reader(reader).unwrap();
             }
             TextageJSType::Titles => {
-                titles = read_titles(&file).unwrap();
+                titles = serde_json::from_reader(reader).unwrap();
             }
         }
     }
