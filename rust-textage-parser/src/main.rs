@@ -1,8 +1,7 @@
 use regex::Regex;
 use reqwest;
-use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
@@ -16,13 +15,6 @@ enum TextageJSType {
     Titles,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-enum StringOrInteger {
-    String(String),
-    Integer(i16),
-}
-
 #[derive(Debug)]
 struct TextageJSParser {
     http_filename: String,
@@ -32,6 +24,20 @@ struct TextageJSParser {
     file_specific_regexes: Vec<(Regex, String)>,
     is_list_not_map: bool,
     js_type: TextageJSType,
+}
+
+#[derive(Debug)]
+struct SongChartUrlMetadata {
+    textage_id: String,
+    version_id_url: String,
+    sp_normal: Option<String>,
+    sp_hyper: Option<String>,
+    sp_another: Option<String>,
+    sp_leggendaria: Option<String>,
+    dp_normal: Option<String>,
+    dp_hyper: Option<String>,
+    dp_another: Option<String>,
+    dp_leggendaria: Option<String>,
 }
 
 // TODO: figure out where this should go
@@ -241,22 +247,101 @@ fn setup_config() -> Vec<TextageJSParser> {
     return v;
 }
 
-fn merge_data(
-    titles: &HashMap<String, Vec<StringOrInteger>>,
-    difficulties: &HashMap<String, Vec<i8>>,
-) {
-    for (textage_id, title_info) in titles {
-        let title = title_info.get(5);
-        let song_difficulty = difficulties.get(textage_id);
-        // TODO: generate a giant lookup that can then be fed into a url generating method
+fn match_title(title: Option<&Value>) -> Option<String> {
+    match title {
+        Some(_) => Some(String::from(title.unwrap().clone().as_str().unwrap())),
+        None => None,
     }
 }
 
-fn deserialize_textage_data() {
+fn match_difficulty(difficulty_level: i8, difficulty_type: &str) -> Option<String> {
+    let mut difficulty_type_url: Option<String> = None;
+    let level_url = match difficulty_level {
+        i8::MIN..=0 => None,
+        n @ 1..=9 => Some(String::from(format!("{}", n))),
+        10 => Some(String::from("A")),
+        11 => Some(String::from("B")),
+        12 => Some(String::from("C")),
+        13..=i8::MAX => None,
+    };
+
+    if level_url != None {
+        difficulty_type_url = match difficulty_type {
+            "NORMAL" => Some(String::from(format!("N{}", level_url.unwrap()))),
+            "HYPER" => Some(String::from(format!("H{}", level_url.unwrap()))),
+            "ANOTHER" => Some(String::from(format!("A{}", level_url.unwrap()))),
+            "LEGGENDARIA" => Some(String::from(format!("X{}", level_url.unwrap()))),
+            _ => None,
+        }
+    }
+    return difficulty_type_url;
+}
+
+fn merge_data(
+    titles: &HashMap<String, Vec<Value>>,
+    difficulties: &HashMap<String, Vec<i8>>,
+) -> HashMap<String, SongChartUrlMetadata> {
+    // TODO: this needs to be reworked sort of
+    let substream_index = "35";
+    let sp_normal_index = 2 * 2 + 1;
+    let sp_hyper_index = 3 * 2 + 1;
+    let sp_another_index = 4 * 2 + 1;
+    let sp_leggendaria_index = 5 * 2 + 1;
+    let dp_normal_index = 7 * 2 + 1;
+    let dp_hyper_index = 8 * 2 + 1;
+    let dp_another_index = 9 * 2 + 1;
+    let dp_leggendaria_index = 10 * 2 + 1;
+    let mut song_metadata: HashMap<String, SongChartUrlMetadata> = HashMap::new();
+
+    for (textage_id, title_info) in titles {
+        if textage_id == "__dmy__" {
+            continue;
+        }
+
+        let title: String;
+        let title_prefix = match_title(title_info.get(5));
+        let title_suffix = match_title(title_info.get(6));
+        if title_suffix != None {
+            title = [title_prefix.unwrap(), title_suffix.unwrap()].join(" ");
+        } else {
+            title = title_prefix.unwrap();
+        }
+        let mut version_id_url = format!("{}", title_info[0].clone().as_i64().unwrap());
+        if version_id_url == substream_index {
+            version_id_url = String::from("s");
+        }
+        let song_difficulty = difficulties.get(textage_id);
+        if song_difficulty == None {
+            continue;
+        }
+        let song = SongChartUrlMetadata {
+            textage_id: textage_id.to_string(),
+            version_id_url: version_id_url,
+            sp_normal: match_difficulty(song_difficulty.unwrap()[sp_normal_index], "NORMAL"),
+            sp_hyper: match_difficulty(song_difficulty.unwrap()[sp_hyper_index], "HYPER"),
+            sp_another: match_difficulty(song_difficulty.unwrap()[sp_another_index], "ANOTHER"),
+            sp_leggendaria: match_difficulty(
+                song_difficulty.unwrap()[sp_leggendaria_index],
+                "LEGGENDARIA",
+            ),
+            dp_normal: match_difficulty(song_difficulty.unwrap()[dp_normal_index], "NORMAL"),
+            dp_hyper: match_difficulty(song_difficulty.unwrap()[dp_hyper_index], "HYPER"),
+            dp_another: match_difficulty(song_difficulty.unwrap()[dp_another_index], "ANOTHER"),
+            dp_leggendaria: match_difficulty(
+                song_difficulty.unwrap()[dp_leggendaria_index],
+                "LEGGENDARIA",
+            ),
+        };
+        song_metadata.insert(title, song);
+    }
+    return song_metadata;
+}
+
+fn deserialize_textage_data() -> HashMap<String, SongChartUrlMetadata> {
     let js_config = setup_config();
     let cache_dir = String::from("./textage-data");
     let mut difficulties: HashMap<String, Vec<i8>> = HashMap::new();
-    let mut titles: HashMap<String, Vec<StringOrInteger>> = HashMap::new();
+    let mut titles: HashMap<String, Vec<Value>> = HashMap::new();
     let mut versions: Vec<String> = vec![];
     for config in &js_config {
         let file = check_textage_metadata_files(&config, &cache_dir);
@@ -274,9 +359,67 @@ fn deserialize_textage_data() {
             }
         }
     }
-    merge_data(&titles, &difficulties);
+    return merge_data(&titles, &difficulties);
+}
+
+fn generate_url(song: &SongChartUrlMetadata, side: String, difficulty: String) -> Option<String> {
+    let mut found_difficulty: Option<String> = None;
+    if difficulty == "NORMAL" {
+        if side == "DP" {
+            found_difficulty = song.dp_normal.clone();
+        } else {
+            found_difficulty = song.sp_normal.clone();
+        }
+    } else if difficulty == "HYPER" {
+        if side == "DP" {
+            found_difficulty = song.dp_hyper.clone();
+        } else {
+            found_difficulty = song.sp_hyper.clone();
+        }
+    } else if difficulty == "ANOTHER" {
+        if side == "DP" {
+            found_difficulty = song.dp_another.clone();
+        } else {
+            found_difficulty = song.sp_another.clone();
+        }
+    } else if difficulty == "LEGGENDARIA" {
+        if side == "DP" {
+            found_difficulty = song.dp_leggendaria.clone();
+        } else {
+            found_difficulty = song.sp_leggendaria.clone();
+        }
+    }
+
+    match found_difficulty {
+        None => None,
+        Some(_) => {
+            let diff = found_difficulty.unwrap();
+            let url_base = "http://textage.cc/score";
+            let side_prefix: String;
+            if side == "DP" {
+                side_prefix = String::from("D");
+            } else if side == "2P" {
+                side_prefix = String::from("2");
+            } else {
+                side_prefix = String::from("1");
+            }
+            let param = format!("{}{}00", side_prefix, diff);
+            let thing = format!(
+                "{}/{}/{}.html?{}",
+                url_base, song.version_id_url, song.textage_id, param
+            );
+            Some(thing)
+        }
+    }
 }
 
 fn main() {
-    deserialize_textage_data();
+    // TODO: songs like 1989 do not use a difficulty parameter so have to figure out those urls
+    let song_data = deserialize_textage_data();
+    let url = generate_url(
+        song_data.get("ALL OK!!").unwrap(),
+        String::from("1P"),
+        String::from("NORMAL"),
+    );
+    println!("{}", url.unwrap());
 }
