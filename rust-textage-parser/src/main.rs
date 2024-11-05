@@ -208,6 +208,7 @@ fn setup_config() -> Vec<TextageJSParser> {
     // we're pulling a list thats declared as a js array, remove the semicolon
     version_title_regexes.push((Regex::new(";").unwrap(), String::from("")));
     version_title_regexes.push((Regex::new("]$").unwrap(), String::from("")));
+    // TODO: have this unwrap the substream version from this text without needing json
     version_title_regexes.push((Regex::new(r"vertbl\[35\]=").unwrap(), String::from(",")));
 
     let song_difficulty_and_version_js = TextageJSParser {
