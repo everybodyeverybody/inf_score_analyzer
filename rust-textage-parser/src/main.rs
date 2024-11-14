@@ -255,7 +255,18 @@ fn match_title(title: Option<&Value>) -> Option<String> {
     }
 }
 
-fn match_difficulty(difficulty_level: i8, difficulty_type: &str) -> Option<String> {
+//fn match_difficulty(difficulty_level: i8, difficulty_type: &str) -> Option<String> {
+fn match_difficulty(
+    song_difficulty: &Vec<i8>,
+    difficulty_index: usize,
+    difficulty_type: &str,
+) -> Option<String> {
+    // scropt = lc[4]&8 ? 1:0;
+    let textage_opttab = [6, 0, 2, 4];
+    let difficulty_level = song_difficulty[difficulty_index];
+    let not_rerated_index = 4;
+    let optional_metadata = usize::try_from(song_difficulty[not_rerated_index] % 4).unwrap();
+
     let mut difficulty_type_url: Option<String> = None;
     let level_url = match difficulty_level {
         i8::MIN..=0 => None,
@@ -284,14 +295,16 @@ fn merge_data(
 ) -> HashMap<String, SongChartUrlMetadata> {
     // TODO: this needs to be reworked sort of
     let substream_index = "35";
-    let sp_normal_index = 2 * 2 + 1;
-    let sp_hyper_index = 3 * 2 + 1;
-    let sp_another_index = 4 * 2 + 1;
-    let sp_leggendaria_index = 5 * 2 + 1;
-    let dp_normal_index = 7 * 2 + 1;
-    let dp_hyper_index = 8 * 2 + 1;
-    let dp_another_index = 9 * 2 + 1;
-    let dp_leggendaria_index = 10 * 2 + 1;
+    let spn_index = 2 * 2 + 1;
+    let sph_index = 3 * 2 + 1;
+    let spa_index = 4 * 2 + 1;
+    let spl_index = 5 * 2 + 1;
+    let dpn_index = 7 * 2 + 1;
+    let dph_index = 8 * 2 + 1;
+    let dpa_index = 9 * 2 + 1;
+    let dpl_index = 10 * 2 + 1;
+    // textage.cc/score/scrlist.js lines 308-312
+    //
     let mut song_metadata: HashMap<String, SongChartUrlMetadata> = HashMap::new();
 
     for (textage_id, title_info) in titles {
@@ -311,27 +324,22 @@ fn merge_data(
         if version_id_url == substream_index {
             version_id_url = String::from("s");
         }
-        let song_difficulty = difficulties.get(textage_id);
-        if song_difficulty == None {
+        let found_song_difficulty = difficulties.get(textage_id);
+        if found_song_difficulty == None {
             continue;
         }
+        let song_difficulty = found_song_difficulty.unwrap();
         let song = SongChartUrlMetadata {
             textage_id: textage_id.to_string(),
             version_id_url: version_id_url,
-            sp_normal: match_difficulty(song_difficulty.unwrap()[sp_normal_index], "NORMAL"),
-            sp_hyper: match_difficulty(song_difficulty.unwrap()[sp_hyper_index], "HYPER"),
-            sp_another: match_difficulty(song_difficulty.unwrap()[sp_another_index], "ANOTHER"),
-            sp_leggendaria: match_difficulty(
-                song_difficulty.unwrap()[sp_leggendaria_index],
-                "LEGGENDARIA",
-            ),
-            dp_normal: match_difficulty(song_difficulty.unwrap()[dp_normal_index], "NORMAL"),
-            dp_hyper: match_difficulty(song_difficulty.unwrap()[dp_hyper_index], "HYPER"),
-            dp_another: match_difficulty(song_difficulty.unwrap()[dp_another_index], "ANOTHER"),
-            dp_leggendaria: match_difficulty(
-                song_difficulty.unwrap()[dp_leggendaria_index],
-                "LEGGENDARIA",
-            ),
+            sp_normal: match_difficulty(song_difficulty, spn_index, "NORMAL"),
+            sp_hyper: match_difficulty(song_difficulty, sph_index, "HYPER"),
+            sp_another: match_difficulty(song_difficulty, spa_index, "ANOTHER"),
+            sp_leggendaria: match_difficulty(song_difficulty, spl_index, "LEGGENDARIA"),
+            dp_normal: match_difficulty(song_difficulty, dpn_index, "NORMAL"),
+            dp_hyper: match_difficulty(song_difficulty, dph_index, "HYPER"),
+            dp_another: match_difficulty(song_difficulty, dpa_index, "ANOTHER"),
+            dp_leggendaria: match_difficulty(song_difficulty, dpl_index, "LEGGENDARIA"),
         };
         song_metadata.insert(title, song);
     }
