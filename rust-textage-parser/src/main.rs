@@ -117,7 +117,6 @@ fn cache_exists_and_is_valid(cache_dir: &str, http_filename: &str) -> bool {
 fn download_and_parse_textage_javascript(js: &TextageJSParser, target_path: &PathBuf) -> PathBuf {
     let javascript = download_textage_javascript(&js.http_filename).unwrap();
     let lines = javascript.lines();
-    println!("{:?}", lines);
     let mut capture_output = false;
     let mut valid_data: Vec<String> = Vec::new();
     let mut start_char = String::from("");
@@ -275,26 +274,80 @@ fn match_title(title: Option<&Value>) -> Option<String> {
     }
 }
 
-fn check_song_suboptions(textage_id: &String, song_levels: &Vec<i8>) -> (bool, bool) {
+fn check_song_suboptions(
+    song_levels: &Vec<i8>,
+    cs_levels: Option<&Vec<i8>>,
+    difficulty_type: Difficulty,
+) -> i8 {
     // textage has known magic bitfields in its url
     // i am not reversing those so we take the "ALL" query parameter
     // and derive the url generation strings from parts of it
-    let textage_all_songs_query_string = String::from("a011B000");
-    let textage_opttab = [6, 0, 2, 4];
-    let not_rerated_index = 4;
-    let optional_metadata = usize::try_from(song_levels[not_rerated_index] % 4).unwrap();
-    return (false, false);
+    //
+    // This does include the query separator
+    let all_songs_query = String::from("?a011B000");
+    //
+    // 	opt  = get_level(tag, type, 2);
+    // twel = opt&2;	// 公式12段階である, exists in a dan course
+    // acin = opt&4;	// ACに収録されてる, exists in AC
+    // function get_level(tag, type, num)
+    // {
+    // 	if (lc[7]>0 && (lc[3]&8) && (2<=type && type<=4 || 7<=type && type<=9)) {
+    // 		if (mt[tag][type*2+num] && actbl[tag] && actbl[tag][type*2+num]) return actbl[tag][type*2+num];
+    // 	}
+    // 	return mt[tag][type*2+num];
+    // }
+    let difficulty_usize = difficulty_type as usize;
+    let options_index = difficulty_usize * 2 + 2;
+    let difficulty_index = difficulty_usize * 2 + 1;
+    let textage_option_one = all_songs_query
+        .chars()
+        .nth(7)
+        .unwrap()
+        .to_digit(10)
+        .unwrap() as usize;
+    let textage_option_two = all_songs_query
+        .chars()
+        .nth(3)
+        .unwrap()
+        .to_digit(16)
+        .unwrap() as usize
+        & 8;
+    let options_value: i8;
+    let mut difficulty_value: i8;
+    if textage_option_one > 0
+        && textage_option_two > 0
+        && (2 <= difficulty_usize && difficulty_usize <= 4
+            || 7 <= difficulty_usize && difficulty_usize <= 9)
+    {
+        options_value = match cs_levels {
+            Some(_) => cs_levels.unwrap()[options_index],
+            None => song_levels[options_index],
+        };
+        difficulty_value = match cs_levels {
+            Some(_) => cs_levels.unwrap()[difficulty_index],
+            None => song_levels[difficulty_index],
+        }
+    } else {
+        options_value = song_levels[options_index];
+        difficulty_value = song_levels[difficulty_index];
+    }
+    let cs_only_or_never_rerated: bool = options_value & 2 > 0;
+    if !cs_only_or_never_rerated {
+        difficulty_value = 0;
+    }
+    return difficulty_value;
 }
-//fn match_difficulty(difficulty_level: i8, difficulty_type: &str) -> Option<String> {
 
-fn match_difficulty(song_levels: &Vec<i8>, difficulty_type: Difficulty) -> Option<String> {
+fn match_difficulty(
+    song_levels: &Vec<i8>,
+    cs_levels: Option<&Vec<i8>>,
+    difficulty_type: Difficulty,
+) -> Option<String> {
     let mut difficulty_type_url: Option<String> = None;
-    let difficulty_index = difficulty_type as usize * 2 + 1;
-    let difficulty_level = song_levels[difficulty_index];
-
+    let difficulty_level = check_song_suboptions(song_levels, cs_levels, difficulty_type);
     let level_url = match difficulty_level {
-        i8::MIN..=0 => None,
-        n @ 1..=9 => Some(String::from(format!("{}", n))),
+        i8::MIN..=-1 => None,
+        n @ 0..=9 => Some(String::from(format!("{}", n))),
         10 => Some(String::from("A")),
         11 => Some(String::from("B")),
         12 => Some(String::from("C")),
@@ -319,6 +372,7 @@ fn match_difficulty(song_levels: &Vec<i8>, difficulty_type: Difficulty) -> Optio
 fn merge_data(
     titles: &HashMap<String, Vec<Value>>,
     difficulties: &HashMap<String, Vec<i8>>,
+    cs_rerated_difficulties: &HashMap<String, Vec<i8>>,
 ) -> HashMap<String, SongChartUrlMetadata> {
     // TODO: this needs to be reworked sort of
     let substream_index = "35";
@@ -347,21 +401,34 @@ fn merge_data(
         if found_song_levels == None {
             continue;
         }
+        let found_cs_levels = cs_rerated_difficulties.get(textage_id);
         let song_levels = found_song_levels.unwrap();
         let song = SongChartUrlMetadata {
             textage_id: textage_id.to_string(),
             version_id_url: version_id_url,
-            sp_normal: match_difficulty(song_levels, Difficulty::SP_NORMAL),
-            sp_hyper: match_difficulty(song_levels, Difficulty::SP_HYPER),
-            sp_another: match_difficulty(song_levels, Difficulty::SP_ANOTHER),
-            sp_leggendaria: match_difficulty(song_levels, Difficulty::SP_LEGGENDARIA),
-            dp_normal: match_difficulty(song_levels, Difficulty::DP_NORMAL),
-            dp_hyper: match_difficulty(song_levels, Difficulty::DP_HYPER),
-            dp_another: match_difficulty(song_levels, Difficulty::DP_ANOTHER),
-            dp_leggendaria: match_difficulty(song_levels, Difficulty::DP_LEGGENDARIA),
+            sp_normal: match_difficulty(song_levels, found_cs_levels, Difficulty::SP_NORMAL),
+            sp_hyper: match_difficulty(song_levels, found_cs_levels, Difficulty::SP_HYPER),
+            sp_another: match_difficulty(song_levels, found_cs_levels, Difficulty::SP_ANOTHER),
+            sp_leggendaria: match_difficulty(
+                song_levels,
+                found_cs_levels,
+                Difficulty::SP_LEGGENDARIA,
+            ),
+            dp_normal: match_difficulty(song_levels, found_cs_levels, Difficulty::DP_NORMAL),
+            dp_hyper: match_difficulty(song_levels, found_cs_levels, Difficulty::DP_HYPER),
+            dp_another: match_difficulty(song_levels, found_cs_levels, Difficulty::DP_ANOTHER),
+            dp_leggendaria: match_difficulty(
+                song_levels,
+                found_cs_levels,
+                Difficulty::DP_LEGGENDARIA,
+            ),
         };
+        if title == "shake" {
+            println!("{:?}", song);
+        }
         song_metadata.insert(title, song);
     }
+
     return song_metadata;
 }
 
@@ -392,8 +459,7 @@ fn deserialize_textage_data() -> HashMap<String, SongChartUrlMetadata> {
             }
         }
     }
-    println!("{:?}", cs_rerated_difficulties);
-    return merge_data(&titles, &difficulties);
+    return merge_data(&titles, &difficulties, &cs_rerated_difficulties);
 }
 
 fn generate_url(song: &SongChartUrlMetadata, side: String, difficulty: String) -> Option<String> {
@@ -451,9 +517,21 @@ fn main() {
     // TODO: songs like 1989 do not use a difficulty parameter so have to figure out those urls
     let song_data = deserialize_textage_data();
     let url = generate_url(
-        song_data.get("ALL OK!!").unwrap(),
+        song_data.get("1989").unwrap(),
         String::from("1P"),
         String::from("NORMAL"),
     );
     println!("{}", url.unwrap());
+    let url = generate_url(
+        song_data.get("2002").unwrap(),
+        String::from("1P"),
+        String::from("NORMAL"),
+    );
+    println!("{}", url.unwrap());
+    //let url = generate_url(
+    //    song_data.get("shake").unwrap(),
+    //    String::from("1P"),
+    //    String::from("HYPER"),
+    //);
+    //println!("{}", url.unwrap());
 }
