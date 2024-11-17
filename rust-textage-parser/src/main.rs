@@ -423,7 +423,8 @@ fn merge_data(
                 Difficulty::DP_LEGGENDARIA,
             ),
         };
-        if title == "shake" {
+        // TODO: check how this gets processed cause it doesnt have a normal chart
+        if title == "Shake" {
             println!("{:?}", song);
         }
         song_metadata.insert(title, song);
