@@ -13,6 +13,19 @@ enum TextageJSType {
     Difficulties,
     Versions,
     Titles,
+    CsReratedDifficulties,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Difficulty {
+    SP_NORMAL = 2, // 2
+    SP_HYPER = 3,
+    SP_ANOTHER = 4,
+    SP_LEGGENDARIA = 5,
+    DP_NORMAL = 7,
+    DP_HYPER = 8,
+    DP_ANOTHER = 9,
+    DP_LEGGENDARIA = 10,
 }
 
 #[derive(Debug)]
@@ -95,10 +108,6 @@ fn cache_exists_and_is_valid(cache_dir: &str, http_filename: &str) -> bool {
         .modified()
         .unwrap();
     let cache_age = now.duration_since(cache_time).unwrap().as_secs_f32();
-    //println!(
-    //    "now {:?} cache time {:?} age {:?}",
-    //    now, cache_time, cache_age
-    //);
     if cache_age < max_cache_age {
         return true;
     }
@@ -106,9 +115,9 @@ fn cache_exists_and_is_valid(cache_dir: &str, http_filename: &str) -> bool {
 }
 
 fn download_and_parse_textage_javascript(js: &TextageJSParser, target_path: &PathBuf) -> PathBuf {
-    println!("download and parse");
     let javascript = download_textage_javascript(&js.http_filename).unwrap();
     let lines = javascript.lines();
+    println!("{:?}", lines);
     let mut capture_output = false;
     let mut valid_data: Vec<String> = Vec::new();
     let mut start_char = String::from("");
@@ -216,7 +225,7 @@ fn setup_config() -> Vec<TextageJSParser> {
         cache_filename: String::from("actbl.js.parsed.json"),
         start_regex: Regex::new(r"^\s*actbl=(\{).*$").unwrap(),
         end_regex: Regex::new(r"\s*}\s*;\s*").unwrap(),
-        file_specific_regexes: song_and_diff_regexes,
+        file_specific_regexes: song_and_diff_regexes.clone(),
         is_list_not_map: false,
         js_type: TextageJSType::Difficulties,
     };
@@ -241,10 +250,21 @@ fn setup_config() -> Vec<TextageJSParser> {
         js_type: TextageJSType::Titles,
     };
 
+    let rerated_js = TextageJSParser {
+        http_filename: String::from("cstbl1.js"),
+        cache_filename: String::from("cstbl1.js.parsed.json"),
+        start_regex: Regex::new(r"^\s*cstbl\[7\]=(\{).*$").unwrap(),
+        end_regex: Regex::new(r"\s*}\s*;\s*").unwrap(),
+        file_specific_regexes: song_and_diff_regexes.clone(),
+        is_list_not_map: false,
+        js_type: TextageJSType::CsReratedDifficulties,
+    };
+
     let mut v: Vec<TextageJSParser> = Vec::new();
     v.push(song_difficulty_and_version_js);
     v.push(version_index_js);
     v.push(song_titles_js);
+    v.push(rerated_js);
     return v;
 }
 
@@ -255,19 +275,23 @@ fn match_title(title: Option<&Value>) -> Option<String> {
     }
 }
 
-//fn match_difficulty(difficulty_level: i8, difficulty_type: &str) -> Option<String> {
-fn match_difficulty(
-    song_difficulty: &Vec<i8>,
-    difficulty_index: usize,
-    difficulty_type: &str,
-) -> Option<String> {
-    // scropt = lc[4]&8 ? 1:0;
+fn check_song_suboptions(textage_id: &String, song_levels: &Vec<i8>) -> (bool, bool) {
+    // textage has known magic bitfields in its url
+    // i am not reversing those so we take the "ALL" query parameter
+    // and derive the url generation strings from parts of it
+    let textage_all_songs_query_string = String::from("a011B000");
     let textage_opttab = [6, 0, 2, 4];
-    let difficulty_level = song_difficulty[difficulty_index];
     let not_rerated_index = 4;
-    let optional_metadata = usize::try_from(song_difficulty[not_rerated_index] % 4).unwrap();
+    let optional_metadata = usize::try_from(song_levels[not_rerated_index] % 4).unwrap();
+    return (false, false);
+}
+//fn match_difficulty(difficulty_level: i8, difficulty_type: &str) -> Option<String> {
 
+fn match_difficulty(song_levels: &Vec<i8>, difficulty_type: Difficulty) -> Option<String> {
     let mut difficulty_type_url: Option<String> = None;
+    let difficulty_index = difficulty_type as usize * 2 + 1;
+    let difficulty_level = song_levels[difficulty_index];
+
     let level_url = match difficulty_level {
         i8::MIN..=0 => None,
         n @ 1..=9 => Some(String::from(format!("{}", n))),
@@ -279,11 +303,14 @@ fn match_difficulty(
 
     if level_url != None {
         difficulty_type_url = match difficulty_type {
-            "NORMAL" => Some(String::from(format!("N{}", level_url.unwrap()))),
-            "HYPER" => Some(String::from(format!("H{}", level_url.unwrap()))),
-            "ANOTHER" => Some(String::from(format!("A{}", level_url.unwrap()))),
-            "LEGGENDARIA" => Some(String::from(format!("X{}", level_url.unwrap()))),
-            _ => None,
+            Difficulty::SP_NORMAL => Some(String::from(format!("N{}", level_url.unwrap()))),
+            Difficulty::SP_HYPER => Some(String::from(format!("H{}", level_url.unwrap()))),
+            Difficulty::SP_ANOTHER => Some(String::from(format!("A{}", level_url.unwrap()))),
+            Difficulty::SP_LEGGENDARIA => Some(String::from(format!("X{}", level_url.unwrap()))),
+            Difficulty::DP_NORMAL => Some(String::from(format!("N{}", level_url.unwrap()))),
+            Difficulty::DP_HYPER => Some(String::from(format!("H{}", level_url.unwrap()))),
+            Difficulty::DP_ANOTHER => Some(String::from(format!("A{}", level_url.unwrap()))),
+            Difficulty::DP_LEGGENDARIA => Some(String::from(format!("X{}", level_url.unwrap()))),
         }
     }
     return difficulty_type_url;
@@ -295,14 +322,6 @@ fn merge_data(
 ) -> HashMap<String, SongChartUrlMetadata> {
     // TODO: this needs to be reworked sort of
     let substream_index = "35";
-    let spn_index = 2 * 2 + 1;
-    let sph_index = 3 * 2 + 1;
-    let spa_index = 4 * 2 + 1;
-    let spl_index = 5 * 2 + 1;
-    let dpn_index = 7 * 2 + 1;
-    let dph_index = 8 * 2 + 1;
-    let dpa_index = 9 * 2 + 1;
-    let dpl_index = 10 * 2 + 1;
     // textage.cc/score/scrlist.js lines 308-312
     //
     let mut song_metadata: HashMap<String, SongChartUrlMetadata> = HashMap::new();
@@ -324,22 +343,22 @@ fn merge_data(
         if version_id_url == substream_index {
             version_id_url = String::from("s");
         }
-        let found_song_difficulty = difficulties.get(textage_id);
-        if found_song_difficulty == None {
+        let found_song_levels = difficulties.get(textage_id);
+        if found_song_levels == None {
             continue;
         }
-        let song_difficulty = found_song_difficulty.unwrap();
+        let song_levels = found_song_levels.unwrap();
         let song = SongChartUrlMetadata {
             textage_id: textage_id.to_string(),
             version_id_url: version_id_url,
-            sp_normal: match_difficulty(song_difficulty, spn_index, "NORMAL"),
-            sp_hyper: match_difficulty(song_difficulty, sph_index, "HYPER"),
-            sp_another: match_difficulty(song_difficulty, spa_index, "ANOTHER"),
-            sp_leggendaria: match_difficulty(song_difficulty, spl_index, "LEGGENDARIA"),
-            dp_normal: match_difficulty(song_difficulty, dpn_index, "NORMAL"),
-            dp_hyper: match_difficulty(song_difficulty, dph_index, "HYPER"),
-            dp_another: match_difficulty(song_difficulty, dpa_index, "ANOTHER"),
-            dp_leggendaria: match_difficulty(song_difficulty, dpl_index, "LEGGENDARIA"),
+            sp_normal: match_difficulty(song_levels, Difficulty::SP_NORMAL),
+            sp_hyper: match_difficulty(song_levels, Difficulty::SP_HYPER),
+            sp_another: match_difficulty(song_levels, Difficulty::SP_ANOTHER),
+            sp_leggendaria: match_difficulty(song_levels, Difficulty::SP_LEGGENDARIA),
+            dp_normal: match_difficulty(song_levels, Difficulty::DP_NORMAL),
+            dp_hyper: match_difficulty(song_levels, Difficulty::DP_HYPER),
+            dp_another: match_difficulty(song_levels, Difficulty::DP_ANOTHER),
+            dp_leggendaria: match_difficulty(song_levels, Difficulty::DP_LEGGENDARIA),
         };
         song_metadata.insert(title, song);
     }
@@ -350,10 +369,12 @@ fn deserialize_textage_data() -> HashMap<String, SongChartUrlMetadata> {
     let js_config = setup_config();
     let cache_dir = String::from("./textage-data");
     let mut difficulties: HashMap<String, Vec<i8>> = HashMap::new();
+    let mut cs_rerated_difficulties: HashMap<String, Vec<i8>> = HashMap::new();
     let mut titles: HashMap<String, Vec<Value>> = HashMap::new();
     let mut versions: Vec<String> = vec![];
     for config in &js_config {
         let file = check_textage_metadata_files(&config, &cache_dir);
+        println!("Parsing {:?}", file);
         let filehandle = File::open(&file).unwrap();
         let reader = BufReader::new(&filehandle);
         match config.js_type {
@@ -366,8 +387,12 @@ fn deserialize_textage_data() -> HashMap<String, SongChartUrlMetadata> {
             TextageJSType::Titles => {
                 titles = serde_json::from_reader(reader).unwrap();
             }
+            TextageJSType::CsReratedDifficulties => {
+                cs_rerated_difficulties = serde_json::from_reader(reader).unwrap();
+            }
         }
     }
+    println!("{:?}", cs_rerated_difficulties);
     return merge_data(&titles, &difficulties);
 }
 
