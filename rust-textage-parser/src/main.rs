@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
+use std::io::BufRead;
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -114,16 +115,22 @@ fn cache_exists_and_is_valid(cache_dir: &str, http_filename: &str) -> bool {
     return false;
 }
 
-fn download_and_parse_textage_javascript(js: &TextageJSParser, target_path: &PathBuf) -> PathBuf {
+fn download_and_parse_textage_javascript(
+    js: &TextageJSParser,
+    raw_target_path: &PathBuf,
+    cached_target_path: &PathBuf,
+) -> (PathBuf, PathBuf) {
     let javascript = download_textage_javascript(&js.http_filename).unwrap();
     let lines = javascript.lines();
     let mut capture_output = false;
     let mut valid_data: Vec<String> = Vec::new();
+    let mut raw_data: Vec<String> = Vec::new();
     let mut start_char = String::from("");
     let skip_blanks = Regex::new(r"^\s*$").unwrap();
     let skip_comments = Regex::new(r"^//.*").unwrap();
 
     for line in lines {
+        raw_data.push(String::from(line));
         if js.start_regex.is_match(line) {
             capture_output = true;
             let match_groups = js.start_regex.captures(line).unwrap();
@@ -157,26 +164,38 @@ fn download_and_parse_textage_javascript(js: &TextageJSParser, target_path: &Pat
             }
         }
     }
+    let raw_data_w_newlines = raw_data.join("\n");
     let valid_data_w_newlines = valid_data.join("\n");
-    _ = File::create(&target_path).unwrap();
-    fs::write(&target_path, valid_data_w_newlines).expect("");
-    let mut return_path = PathBuf::new();
-    return_path.push(&target_path);
-    return return_path;
+    _ = File::create(&raw_target_path).unwrap();
+    _ = File::create(&cached_target_path).unwrap();
+    fs::write(&raw_target_path, raw_data_w_newlines).expect("");
+    fs::write(&cached_target_path, valid_data_w_newlines).expect("");
+    let mut raw_return_path = PathBuf::new();
+    let mut cached_return_path = PathBuf::new();
+    raw_return_path.push(&raw_target_path);
+    cached_return_path.push(&cached_target_path);
+    return (raw_return_path, cached_return_path);
 }
 
-fn check_textage_metadata_files(js: &TextageJSParser, cache_dir: &String) -> PathBuf {
+fn check_textage_metadata_files(js: &TextageJSParser, cache_dir: &String) -> (PathBuf, PathBuf) {
     println!("check textage song metadata files");
     // TODO: make this a config/global
-    let cache_ok = cache_exists_and_is_valid(&cache_dir, &js.cache_filename);
-    let mut cached_filepath = PathBuf::from(cache_dir);
-    cached_filepath.push(&js.cache_filename);
-    if cache_ok {
+    let raw_cache_ok = cache_exists_and_is_valid(&cache_dir, &js.http_filename);
+    let parsed_cache_ok = cache_exists_and_is_valid(&cache_dir, &js.cache_filename);
+    let mut raw_cached_filepath = PathBuf::from(cache_dir);
+    let mut parsed_cached_filepath = PathBuf::from(cache_dir);
+    raw_cached_filepath.push(&js.http_filename);
+    parsed_cached_filepath.push(&js.cache_filename);
+    if raw_cache_ok && parsed_cache_ok {
         println!("cache ok");
-        return cached_filepath;
+        return (raw_cached_filepath, parsed_cached_filepath);
     } else {
         println!("downloading");
-        return download_and_parse_textage_javascript(&js, &cached_filepath);
+        return download_and_parse_textage_javascript(
+            &js,
+            &raw_cached_filepath,
+            &parsed_cached_filepath,
+        );
     }
 }
 
@@ -285,17 +304,6 @@ fn check_song_suboptions(
     //
     // This does include the query separator
     let all_songs_query = String::from("?a011B000");
-    //
-    // 	opt  = get_level(tag, type, 2);
-    // twel = opt&2;	// 公式12段階である, exists in a dan course
-    // acin = opt&4;	// ACに収録されてる, exists in AC
-    // function get_level(tag, type, num)
-    // {
-    // 	if (lc[7]>0 && (lc[3]&8) && (2<=type && type<=4 || 7<=type && type<=9)) {
-    // 		if (mt[tag][type*2+num] && actbl[tag] && actbl[tag][type*2+num]) return actbl[tag][type*2+num];
-    // 	}
-    // 	return mt[tag][type*2+num];
-    // }
     let difficulty_usize = difficulty_type as usize;
     let options_index = difficulty_usize * 2 + 2;
     let difficulty_index = difficulty_usize * 2 + 1;
@@ -313,7 +321,7 @@ fn check_song_suboptions(
         .unwrap() as usize
         & 8;
     let options_value: i8;
-    let mut difficulty_value: i8;
+    let difficulty_value: i8;
     if textage_option_one > 0
         && textage_option_two > 0
         && (2 <= difficulty_usize && difficulty_usize <= 4
@@ -332,9 +340,14 @@ fn check_song_suboptions(
         difficulty_value = song_levels[difficulty_index];
     }
     let cs_only_or_never_rerated: bool = options_value & 2 > 0;
-    if !cs_only_or_never_rerated {
-        difficulty_value = 0;
+    if difficulty_value <= 0 {
+        return -1;
     }
+
+    if !cs_only_or_never_rerated {
+        return 0;
+    }
+
     return difficulty_value;
 }
 
@@ -374,7 +387,8 @@ fn merge_data(
     difficulties: &HashMap<String, Vec<i8>>,
     cs_rerated_difficulties: &HashMap<String, Vec<i8>>,
 ) -> HashMap<String, SongChartUrlMetadata> {
-    // TODO: this needs to be reworked sort of
+    // TODO: write a function in the parser that extends the array in the textage way
+    // and finds the substream index
     let substream_index = "35";
     // textage.cc/score/scrlist.js lines 308-312
     //
@@ -423,10 +437,6 @@ fn merge_data(
                 Difficulty::DP_LEGGENDARIA,
             ),
         };
-        // TODO: check how this gets processed cause it doesnt have a normal chart
-        if title == "Shake" {
-            println!("{:?}", song);
-        }
         song_metadata.insert(title, song);
     }
 
@@ -441,9 +451,9 @@ fn deserialize_textage_data() -> HashMap<String, SongChartUrlMetadata> {
     let mut titles: HashMap<String, Vec<Value>> = HashMap::new();
     let mut versions: Vec<String> = vec![];
     for config in &js_config {
-        let file = check_textage_metadata_files(&config, &cache_dir);
-        println!("Parsing {:?}", file);
-        let filehandle = File::open(&file).unwrap();
+        let (raw_file, parsed_file) = check_textage_metadata_files(&config, &cache_dir);
+        println!("Serializing {:?}", parsed_file);
+        let filehandle = File::open(&parsed_file).unwrap();
         let reader = BufReader::new(&filehandle);
         match config.js_type {
             TextageJSType::Difficulties => {
@@ -529,10 +539,11 @@ fn main() {
         String::from("NORMAL"),
     );
     println!("{}", url.unwrap());
-    //let url = generate_url(
-    //    song_data.get("shake").unwrap(),
-    //    String::from("1P"),
-    //    String::from("HYPER"),
-    //);
-    //println!("{}", url.unwrap());
+    // should throw a panic
+    let url = generate_url(
+        song_data.get("Shake").unwrap(),
+        String::from("1P"),
+        String::from("NORMAL"),
+    );
+    println!("{}", url.unwrap());
 }
