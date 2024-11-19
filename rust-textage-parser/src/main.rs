@@ -4,7 +4,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
-use std::io::BufRead;
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -43,6 +42,8 @@ struct TextageJSParser {
 #[derive(Debug)]
 struct SongChartUrlMetadata {
     textage_id: String,
+    textage_version_id: usize,
+    version_name: String,
     version_id_url: String,
     sp_normal: Option<String>,
     sp_hyper: Option<String>,
@@ -386,10 +387,12 @@ fn merge_data(
     titles: &HashMap<String, Vec<Value>>,
     difficulties: &HashMap<String, Vec<i8>>,
     cs_rerated_difficulties: &HashMap<String, Vec<i8>>,
+    versions: &Vec<String>,
+    substream_index: usize,
 ) -> HashMap<String, SongChartUrlMetadata> {
     // TODO: write a function in the parser that extends the array in the textage way
     // and finds the substream index
-    let substream_index = "35";
+    let substream_index_str = format!("{}", substream_index);
     // textage.cc/score/scrlist.js lines 308-312
     //
     let mut song_metadata: HashMap<String, SongChartUrlMetadata> = HashMap::new();
@@ -407,9 +410,16 @@ fn merge_data(
         } else {
             title = title_prefix.unwrap();
         }
-        let mut version_id_url = format!("{}", title_info[0].clone().as_i64().unwrap());
-        if version_id_url == substream_index {
+        let textage_version_id: i64 = title_info[0].clone().as_i64().unwrap();
+        let mut textage_version_index: usize = textage_version_id as usize;
+        if textage_version_id == -1 {
+            textage_version_index = substream_index;
+        }
+        let version_id_url: String;
+        if textage_version_index == substream_index {
             version_id_url = String::from("s");
+        } else {
+            version_id_url = format!("{}", textage_version_id);
         }
         let found_song_levels = difficulties.get(textage_id);
         if found_song_levels == None {
@@ -419,6 +429,8 @@ fn merge_data(
         let song_levels = found_song_levels.unwrap();
         let song = SongChartUrlMetadata {
             textage_id: textage_id.to_string(),
+            textage_version_id: textage_version_index,
+            version_name: versions[textage_version_index].clone(),
             version_id_url: version_id_url,
             sp_normal: match_difficulty(song_levels, found_cs_levels, Difficulty::SP_NORMAL),
             sp_hyper: match_difficulty(song_levels, found_cs_levels, Difficulty::SP_HYPER),
@@ -443,6 +455,42 @@ fn merge_data(
     return song_metadata;
 }
 
+fn get_version_offset(raw_versions_file: &PathBuf, versions: &Vec<String>) -> (usize, Vec<String>) {
+    // textage keeps track of substreams index as a sentinel value in this array
+    // and does text comparison to get it, we extract it via regex and provide
+    // a vec similar to the js array it provides
+    //
+    // we may or may not need the version data
+    let raw_versions_data = std::fs::read_to_string(raw_versions_file).unwrap();
+    let regex = Regex::new(r"^vertbl\[(\d+)\]=.*").unwrap();
+    let mut new_vec: Vec<String> = Vec::new();
+    let mut substream_index: usize = 0;
+    for line in raw_versions_data.lines() {
+        if regex.is_match(line) {
+            substream_index = regex
+                .captures(line)
+                .unwrap()
+                .get(1)
+                .unwrap()
+                .as_str()
+                .parse::<usize>()
+                .unwrap();
+            new_vec = Vec::with_capacity(substream_index);
+            for value in versions.iter() {
+                if value == "substream" {
+                    continue;
+                }
+                new_vec.push(String::from(value));
+            }
+            while new_vec.len() < substream_index {
+                new_vec.push(String::from(""));
+            }
+            new_vec.push(String::from("substream"));
+        }
+    }
+    return (substream_index, new_vec);
+}
+
 fn deserialize_textage_data() -> HashMap<String, SongChartUrlMetadata> {
     let js_config = setup_config();
     let cache_dir = String::from("./textage-data");
@@ -450,6 +498,7 @@ fn deserialize_textage_data() -> HashMap<String, SongChartUrlMetadata> {
     let mut cs_rerated_difficulties: HashMap<String, Vec<i8>> = HashMap::new();
     let mut titles: HashMap<String, Vec<Value>> = HashMap::new();
     let mut versions: Vec<String> = vec![];
+    let mut substream_offset: usize = 0;
     for config in &js_config {
         let (raw_file, parsed_file) = check_textage_metadata_files(&config, &cache_dir);
         println!("Serializing {:?}", parsed_file);
@@ -461,6 +510,8 @@ fn deserialize_textage_data() -> HashMap<String, SongChartUrlMetadata> {
             }
             TextageJSType::Versions => {
                 versions = serde_json::from_reader(reader).unwrap();
+                println!("Serializing {:?}", raw_file);
+                (substream_offset, versions) = get_version_offset(&raw_file, &versions);
             }
             TextageJSType::Titles => {
                 titles = serde_json::from_reader(reader).unwrap();
@@ -470,7 +521,13 @@ fn deserialize_textage_data() -> HashMap<String, SongChartUrlMetadata> {
             }
         }
     }
-    return merge_data(&titles, &difficulties, &cs_rerated_difficulties);
+    return merge_data(
+        &titles,
+        &difficulties,
+        &cs_rerated_difficulties,
+        &versions,
+        substream_offset,
+    );
 }
 
 fn generate_url(song: &SongChartUrlMetadata, side: String, difficulty: String) -> Option<String> {
@@ -534,16 +591,16 @@ fn main() {
     );
     println!("{}", url.unwrap());
     let url = generate_url(
-        song_data.get("2002").unwrap(),
+        song_data.get("321 STARS").unwrap(),
         String::from("1P"),
         String::from("NORMAL"),
     );
     println!("{}", url.unwrap());
     // should throw a panic
-    let url = generate_url(
-        song_data.get("Shake").unwrap(),
-        String::from("1P"),
-        String::from("NORMAL"),
-    );
-    println!("{}", url.unwrap());
+    // let url = generate_url(
+    //     song_data.get("Shake").unwrap(),
+    //     String::from("1P"),
+    //     String::from("NORMAL"),
+    // );
+    // println!("{}", url.unwrap());
 }
