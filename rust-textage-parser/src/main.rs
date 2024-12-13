@@ -84,14 +84,14 @@ impl TextageChartSearch {
         let mut new_one = Self {
             url_metadata: HashMap::new(),
         };
-        new_one.url_metadata = new_one.deserialize_textage_data();
+        new_one.url_metadata = new_one.create_song_metadata_map();
         return new_one;
     }
 
     pub fn refresh(mut self) {
         // Update url_metadata in place. This method may not
         // be useful and instead you want to overwrite with new().
-        self.url_metadata = self.deserialize_textage_data();
+        self.url_metadata = self.create_song_metadata_map();
     }
 
     pub fn find(&self, query_string: String) -> String {
@@ -221,25 +221,24 @@ impl TextageChartSearch {
         return Some((title, difficulty, side));
     }
 
-    pub(self) fn deserialize_textage_data(&self) -> HashMap<String, SongChartUrlMetadata> {
+    pub(self) fn create_song_metadata_map(&self) -> HashMap<String, SongChartUrlMetadata> {
         // All of the work is done here.
         // We first read in our file and parser configuration, then
         // check for any locally cached data and redownload if necessary.
         // We then apply each parser to each downloaded or cached file,
         // and load it into a hashmap for later lookups via our API methods.
-        let js_config = self.setup_config();
+        let js_parsers = self.setup_js_parsers();
         let cache_dir = String::from("./textage-data");
         let mut difficulties: HashMap<String, Vec<i8>> = HashMap::new();
         let mut cs_rerated_difficulties: HashMap<String, Vec<i8>> = HashMap::new();
         let mut titles: HashMap<String, Vec<Value>> = HashMap::new();
         let mut versions: Vec<String> = vec![];
         let mut substream_offset: usize = 0;
-        for config in &js_config {
-            let (raw_file, parsed_file) = self.check_textage_metadata_files(&config, &cache_dir);
-            //println!("Serializing {:?}", parsed_file);
+        for parser in &js_parsers {
+            let (raw_file, parsed_file) = self.check_textage_metadata_files(&parser, &cache_dir);
             let filehandle = File::open(&parsed_file).unwrap();
             let reader = BufReader::new(&filehandle);
-            match config.js_type {
+            match parser.js_type {
                 TextageJSType::Difficulties => {
                     difficulties = serde_json::from_reader(reader).unwrap();
                 }
@@ -256,7 +255,6 @@ impl TextageChartSearch {
                 }
             }
         }
-
         // Given we're translating from BPI data to textage data,
         // there are some inconsistencies in song naming and spacing
         //
@@ -285,7 +283,7 @@ impl TextageChartSearch {
         );
     }
 
-    pub(self) fn setup_config(&self) -> Vec<TextageJSParser> {
+    pub(self) fn setup_js_parsers(&self) -> Vec<TextageJSParser> {
         // Configures collections of regexes to be run in order
         // against the textage JS data. Only run on initialization or refreshes.
         //
@@ -840,11 +838,11 @@ impl TextageChartSearch {
                 };
 
                 let param = format!("{}{}00", side_prefix, diff);
-                let thing = format!(
+                let url = format!(
                     "{}/{}/{}.html?{}",
                     url_base, song.version_id_url, song.textage_id, param
                 );
-                Some(thing)
+                Some(url)
             }
         }
     }
