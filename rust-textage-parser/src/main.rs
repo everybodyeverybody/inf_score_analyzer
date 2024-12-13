@@ -473,7 +473,6 @@ impl TextageChartSearch {
         raw_target_path: &PathBuf,
         cached_target_path: &PathBuf,
     ) -> (PathBuf, PathBuf) {
-        // Download and transforms the textage javascript into JSON in our cache dir.
         let javascript = self.download_textage_javascript(&js.http_filename).unwrap();
         let lines = javascript.lines();
         let mut capture_output = false;
@@ -560,48 +559,6 @@ impl TextageChartSearch {
                 &parsed_cached_filepath,
             );
         }
-    }
-
-    pub(self) fn match_title(&self, title: Option<&Value>) -> Option<String> {
-        // Helper method for unwrapping regex matches into strings.
-        match title {
-            Some(_) => Some(String::from(title.unwrap().clone().as_str().unwrap())),
-            None => None,
-        }
-    }
-
-    pub(self) fn match_difficulty(
-        &self,
-        song_levels: &Vec<i8>,
-        cs_levels: Option<&Vec<i8>>,
-        difficulty_type: Difficulty,
-    ) -> Option<String> {
-        // Generates the difficulty part of the URL query string depending on the queried
-        // difficulty type and the song's own metadata.
-        let mut difficulty_type_url: Option<String> = None;
-        let difficulty_level = self.check_song_suboptions(song_levels, cs_levels, difficulty_type);
-        let level_url = match difficulty_level {
-            i8::MIN..=-1 => None,
-            n @ 0..=9 => Some(String::from(format!("{}", n))),
-            10 => Some(String::from("A")),
-            11 => Some(String::from("B")),
-            12 => Some(String::from("C")),
-            13..=i8::MAX => None,
-        };
-
-        if level_url != None {
-            difficulty_type_url = match difficulty_type {
-                Difficulty::SPNormal => Some(String::from(format!("N{}", level_url.unwrap()))),
-                Difficulty::SPHyper => Some(String::from(format!("H{}", level_url.unwrap()))),
-                Difficulty::SPAnother => Some(String::from(format!("A{}", level_url.unwrap()))),
-                Difficulty::SPLeggendaria => Some(String::from(format!("X{}", level_url.unwrap()))),
-                Difficulty::DPNormal => Some(String::from(format!("N{}", level_url.unwrap()))),
-                Difficulty::DPHyper => Some(String::from(format!("H{}", level_url.unwrap()))),
-                Difficulty::DPAnother => Some(String::from(format!("A{}", level_url.unwrap()))),
-                Difficulty::DPLeggendaria => Some(String::from(format!("X{}", level_url.unwrap()))),
-            }
-        }
-        return difficulty_type_url;
     }
 
     pub(self) fn check_song_suboptions(
@@ -762,6 +719,48 @@ impl TextageChartSearch {
         }
 
         return song_metadata;
+    }
+
+    pub(self) fn match_title(&self, title: Option<&Value>) -> Option<String> {
+        // Helper method for unwrapping regex matches into strings.
+        match title {
+            Some(_) => Some(String::from(title.unwrap().clone().as_str().unwrap())),
+            None => None,
+        }
+    }
+
+    pub(self) fn match_difficulty(
+        &self,
+        song_levels: &Vec<i8>,
+        cs_levels: Option<&Vec<i8>>,
+        difficulty_type: Difficulty,
+    ) -> Option<String> {
+        // Generates the difficulty part of the URL query string depending on the queried
+        // difficulty type and the song's own metadata.
+        let mut difficulty_type_url: Option<String> = None;
+        let difficulty_level = self.check_song_suboptions(song_levels, cs_levels, difficulty_type);
+        let level_url = match difficulty_level {
+            i8::MIN..=-1 => None,
+            n @ 0..=9 => Some(String::from(format!("{}", n))),
+            10 => Some(String::from("A")),
+            11 => Some(String::from("B")),
+            12 => Some(String::from("C")),
+            13..=i8::MAX => None,
+        };
+
+        if level_url != None {
+            difficulty_type_url = match difficulty_type {
+                Difficulty::SPNormal => Some(String::from(format!("N{}", level_url.unwrap()))),
+                Difficulty::SPHyper => Some(String::from(format!("H{}", level_url.unwrap()))),
+                Difficulty::SPAnother => Some(String::from(format!("A{}", level_url.unwrap()))),
+                Difficulty::SPLeggendaria => Some(String::from(format!("X{}", level_url.unwrap()))),
+                Difficulty::DPNormal => Some(String::from(format!("N{}", level_url.unwrap()))),
+                Difficulty::DPHyper => Some(String::from(format!("H{}", level_url.unwrap()))),
+                Difficulty::DPAnother => Some(String::from(format!("A{}", level_url.unwrap()))),
+                Difficulty::DPLeggendaria => Some(String::from(format!("X{}", level_url.unwrap()))),
+            }
+        }
+        return difficulty_type_url;
     }
 
     pub(self) fn get_version_offset(
