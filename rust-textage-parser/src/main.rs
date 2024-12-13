@@ -2,6 +2,7 @@ use regex::Regex;
 use reqwest;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::BufReader;
@@ -50,6 +51,8 @@ struct TextageJSParser {
 struct SongChartUrlMetadata {
     textage_id: String,
     textage_version_id: usize,
+    bpi_title: String,
+    textage_title: String,
     version_name: String,
     version_id_url: String,
     sp_normal: Option<String>,
@@ -66,6 +69,7 @@ struct SongChartUrlMetadata {
 struct TextageChartSearch {
     url_metadata: HashMap<String, SongChartUrlMetadata>,
 }
+
 impl TextageChartSearch {
     // I originally wrote this as a standalone application
     // that parsed from the commandline and refactored it into
@@ -232,7 +236,7 @@ impl TextageChartSearch {
         let mut substream_offset: usize = 0;
         for config in &js_config {
             let (raw_file, parsed_file) = self.check_textage_metadata_files(&config, &cache_dir);
-            println!("Serializing {:?}", parsed_file);
+            //println!("Serializing {:?}", parsed_file);
             let filehandle = File::open(&parsed_file).unwrap();
             let reader = BufReader::new(&filehandle);
             match config.js_type {
@@ -241,7 +245,7 @@ impl TextageChartSearch {
                 }
                 TextageJSType::Versions => {
                     versions = serde_json::from_reader(reader).unwrap();
-                    println!("Serializing {:?}", raw_file);
+                    //println!("Serializing {:?}", raw_file);
                     (substream_offset, versions) = self.get_version_offset(&raw_file, &versions);
                 }
                 TextageJSType::Titles => {
@@ -252,11 +256,31 @@ impl TextageChartSearch {
                 }
             }
         }
+
+        // Given we're translating from BPI data to textage data,
+        // there are some inconsistencies in song naming and spacing
+        //
+        // Rather than write a bunch of specialized regexes, we note
+        // songs that cannot be found and update the accompanying JSON
+        // file with the following key/value pair:
+        //
+        // key: the textage ID from textage-data/titletbl.js.parsed.json
+        // value: the BPI song title
+        //
+        // We find the key by searching that textage file for
+        // the BPI song title or genre or artist
+        let textage_normalizer_json = PathBuf::from("./textage_to_bpi_normalizer.json");
+        let filehandle = File::open(&textage_normalizer_json).unwrap();
+        let reader = BufReader::new(&filehandle);
+        let textage_to_bpi_normalizer: HashMap<String, String> =
+            serde_json::from_reader(reader).unwrap();
+
         return self.merge_data(
             &titles,
             &difficulties,
             &cs_rerated_difficulties,
             &versions,
+            &textage_to_bpi_normalizer,
             substream_offset,
         );
     }
@@ -371,7 +395,7 @@ impl TextageChartSearch {
         // so this may be bad. This is the code I am least confident about in
         // this entire stack.
         let textage_base_url = format!("https://textage.cc/score/{}", http_filename);
-        println!("downloading from {}", textage_base_url);
+        //println!("downloading from {}", textage_base_url);
         let response = reqwest::get(textage_base_url)
             .await?
             .text_with_charset("Shift_JIS")
@@ -481,7 +505,7 @@ impl TextageChartSearch {
                         end_char = String::from("]");
                     }
                     valid_data.push(end_char);
-                    println!("{} stopping at {}", js.http_filename, line);
+                    //println!("{} stopping at {}", js.http_filename, line);
                     break;
                 } else {
                     if skip_comments.is_match(line) || skip_blanks.is_match(line) {
@@ -518,7 +542,7 @@ impl TextageChartSearch {
         //
         // If valid, read the data from disk. If they're not, redownload the data from textage.
         // TODO: have this maybe have a force update flag
-        println!("check textage song metadata files");
+        //println!("check textage song metadata files");
         let raw_cache_ok = self.cache_exists_and_is_valid(&cache_dir, &js.http_filename);
         let parsed_cache_ok = self.cache_exists_and_is_valid(&cache_dir, &js.cache_filename);
         let mut raw_cached_filepath = PathBuf::from(cache_dir);
@@ -526,10 +550,10 @@ impl TextageChartSearch {
         raw_cached_filepath.push(&js.http_filename);
         parsed_cached_filepath.push(&js.cache_filename);
         if raw_cache_ok && parsed_cache_ok {
-            println!("cache ok");
+            //println!("cache ok");
             return (raw_cached_filepath, parsed_cached_filepath);
         } else {
-            println!("downloading");
+            //println!("downloading");
             return self.download_and_parse_textage_javascript(
                 &js,
                 &raw_cached_filepath,
@@ -646,6 +670,7 @@ impl TextageChartSearch {
         difficulties: &HashMap<String, Vec<i8>>,
         cs_rerated_difficulties: &HashMap<String, Vec<i8>>,
         versions: &Vec<String>,
+        textage_to_bpi_normalizer: &HashMap<String, String>,
         substream_index: usize,
     ) -> HashMap<String, SongChartUrlMetadata> {
         // Combines all the song metadata and generated url metadata
@@ -661,14 +686,21 @@ impl TextageChartSearch {
                 continue;
             }
 
-            let title: String;
+            let normalized_bpi_title = textage_to_bpi_normalizer.get(textage_id);
+            let textage_title: String;
             let title_prefix = self.match_title(title_info.get(5));
             let title_suffix = self.match_title(title_info.get(6));
             if title_suffix != None {
-                title = [title_prefix.unwrap(), title_suffix.unwrap()].join(" ");
+                textage_title = [title_prefix.unwrap(), title_suffix.unwrap()].join("");
             } else {
-                title = title_prefix.unwrap();
+                textage_title = title_prefix.unwrap();
             }
+
+            let title = match normalized_bpi_title {
+                Some(found_title) => found_title.clone(),
+                None => textage_title.clone(),
+            };
+
             let textage_version_id: i64 = title_info[0].clone().as_i64().unwrap();
             let mut textage_version_index: usize = textage_version_id as usize;
             if textage_version_id == -1 {
@@ -689,6 +721,8 @@ impl TextageChartSearch {
             let song = SongChartUrlMetadata {
                 textage_id: textage_id.to_string(),
                 textage_version_id: textage_version_index,
+                textage_title: textage_title.clone(),
+                bpi_title: title.clone(),
                 version_name: versions[textage_version_index].clone(),
                 version_id_url: version_id_url,
                 sp_normal: self.match_difficulty(
@@ -819,9 +853,8 @@ impl TextageChartSearch {
 
 fn main() {
     let song_search = TextageChartSearch::new();
-    println!("{}", song_search.find(String::from("1989")));
-    println!("{}", song_search.find(String::from("1989 ANOTHER")));
-    println!("{}", song_search.find(String::from("1989 Another")));
-    println!("{}", song_search.find(String::from("1989 Another 1P")));
-    println!("{}", song_search.find(String::from("1989 hyper DP")));
+    let args: Vec<String> = env::args().collect();
+    let query = String::from(&args[1]);
+    let result = song_search.find(query);
+    println!("{}", result);
 }
