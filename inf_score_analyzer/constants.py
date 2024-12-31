@@ -235,6 +235,6 @@ USER_DB = DATA_DIR / Path(USER_DB_NAME)
 MIN_APP_AGE_UPDATE_SECONDS = 43200
 TACHI_API_TOKEN = os.getenv("TACHI_API_TOKEN")
 KAMAITACHI_API_URL = "https://kamai.tachi.ac/ir/direct-manual/import"
-KAMAITACHI_SONG_LIST_URL = "https://raw.githubusercontent.com/zkldi/Tachi/main/database-seeds/collections/songs-iidx.json"
+KAMAITACHI_SONG_LIST_URL = "https://raw.githubusercontent.com/zkrising/Tachi/refs/heads/main/seeds/collections/songs-iidx.json"
 COMMUNITY_RANK_TABLE_URL = "https://iidx-sp12.github.io/songs.json"
 COMMUNITY_RANK_TABLE_ID = "SP12"
