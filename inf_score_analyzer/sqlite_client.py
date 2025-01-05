@@ -4,11 +4,11 @@ import os
 import uuid
 import logging
 import sqlite3
+from pathlib import Path
 from datetime import datetime, date, timezone
 
-import numpy
-from numpy.typing import NDArray
-import polyleven  # type: ignore
+import numpy  # type: ignore
+from numpy.typing import NDArray  # type: ignore
 
 from . import constants as CONSTANTS
 from .download_textage_tables import get_infinitas_song_metadata
@@ -16,7 +16,8 @@ from .kamaitachi_client import (
     download_kamaitachi_song_list,
     normalize_textage_to_kamaitachi,
 )
-from .local_dataclasses import Score, OCRSongTitles, SongReference, Difficulty
+from .song_reference import SongReference
+from .local_dataclasses import Score, OCRSongTitles, Difficulty
 
 log = logging.getLogger(__name__)
 
@@ -98,12 +99,23 @@ def create_user_database():
         "jp_title_ocr text,"
         "jp_artist_ocr text)"
     )
+    add_total_score_to_score_table = (
+        "alter table score add column total_score integer default 0"
+    )
+    add_miss_count_to_score_table = (
+        "alter table score add column miss_count integer default 0;"
+    )
     user_db_connection = sqlite3.connect(CONSTANTS.USER_DB)
     db_cursor = user_db_connection.cursor()
     db_cursor.execute(create_session_table_query)
     db_cursor.execute(create_score_table_query)
     db_cursor.execute(create_score_time_series_query)
     db_cursor.execute(create_score_ocr_query)
+    if not check_table_schema_for_column(CONSTANTS.USER_DB, "score", "total_score"):
+        db_cursor.execute(add_total_score_to_score_table)
+    if not check_table_schema_for_column(CONSTANTS.USER_DB, "score", "miss_count"):
+        db_cursor.execute(add_miss_count_to_score_table)
+    return
 
 
 def populate_app_database():
@@ -310,7 +322,7 @@ def read_song_data_from_db() -> SongReference:
     log.info(f"Loading in song info from {CONSTANTS.APP_DB}")
     query = (
         "select s.textage_id,d.difficulty,sd.level,sd.notes,sd.min_bpm, "
-        "sd.max_bpm, s.artist,s.title "
+        "sd.max_bpm, s.artist,s.title, s.genre "
         "from songs s "
         "join song_difficulty_metadata sd "
         "on sd.textage_id=s.textage_id "
@@ -322,6 +334,8 @@ def read_song_data_from_db() -> SongReference:
     songs_by_difficulty: dict[tuple[str, int], set[str]] = {}
     songs_by_bpm: dict[tuple[int, int], set[str]] = {}
     songs_by_notes: dict[int, set[str]] = {}
+    songs_by_difficulty_and_notes: dict[tuple[str, int, int], set[str]] = {}
+    songs_by_genre: dict[str, set[str]] = {}
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     db_cursor = app_db_connection.cursor()
     result = db_cursor.execute(query)
@@ -330,9 +344,11 @@ def read_song_data_from_db() -> SongReference:
         notes = row[3]
         cleaned_artist = row[6].strip()
         cleaned_title = row[7].strip()
+        cleaned_genre = row[8].strip()
         songs_by_title[cleaned_title] = textage_id
         bpm_tuple: tuple[int, int] = (row[4], row[5])
         difficulty_tuple: tuple[str, int] = (row[1], row[2])
+        difficulty_and_notes_tuple: tuple[str, int, int] = (row[1], row[2], notes)
         if cleaned_artist not in songs_by_artist:
             songs_by_artist[cleaned_artist] = set([])
         songs_by_artist[cleaned_artist].add(textage_id)
@@ -341,8 +357,14 @@ def read_song_data_from_db() -> SongReference:
         songs_by_difficulty[difficulty_tuple].add(textage_id)
         if bpm_tuple not in songs_by_bpm:
             songs_by_bpm[bpm_tuple] = set([])
+        if difficulty_and_notes_tuple not in songs_by_difficulty_and_notes:
+            songs_by_difficulty_and_notes[difficulty_and_notes_tuple] = set([])
         if notes not in songs_by_notes:
             songs_by_notes[notes] = set([])
+        if cleaned_genre not in songs_by_genre:
+            songs_by_genre[cleaned_genre] = set([])
+        songs_by_genre[cleaned_genre].add(textage_id)
+        songs_by_difficulty_and_notes[difficulty_and_notes_tuple].add(textage_id)
         songs_by_bpm[bpm_tuple].add(textage_id)
         songs_by_notes[notes].add(textage_id)
     return SongReference(
@@ -351,6 +373,8 @@ def read_song_data_from_db() -> SongReference:
         by_title=songs_by_title,
         by_note_count=songs_by_notes,
         by_bpm=songs_by_bpm,
+        by_difficulty_and_notes=songs_by_difficulty_and_notes,
+        by_genre=songs_by_genre,
     )
 
 
@@ -373,33 +397,25 @@ def write_session_end(session_uuid: str) -> None:
     return None
 
 
+def check_table_schema_for_column(db: Path, table_name: str, column: str) -> bool:
+    query = f"PRAGMA table_info({table_name})"
+    user_db_connection = sqlite3.connect(db)
+    db_cursor = user_db_connection.cursor()
+    results = [column[1] for column in db_cursor.execute(query).fetchall()]
+    return column in results
+
+
 def write_score(
     session_uuid: str,
-    title: OCRSongTitles,
+    textage_id: str,
     score: Score,
-    difficulty: str,
+    difficulty: Difficulty,
+    ocr_titles: OCRSongTitles,
     score_frame: NDArray,
-    song_reference: SongReference,
-    level: int,
-    metadata_title: set[str],
 ) -> None:
-    referenced_textage_id = None
-    # TODO: extract this somewhere else
-    resolved_song_info = song_reference.resolve_ocr(title, difficulty, level)
-    if resolved_song_info is not None:
-        referenced_textage_id = resolved_song_info
-    else:
-        if len(metadata_title) == 1:
-            referenced_textage_id = next(iter(metadata_title))
-            log.info(f"Using metadata title: {referenced_textage_id}")
-        else:
-            log.warning(f"Found too much metadata, {metadata_title}, tiebreaking")
-            referenced_textage_id = metadata_lookup_tiebreaker(metadata_title, title)
-            log.warning(f"Tiebreaker found: {referenced_textage_id}")
-    difficulty_id = Difficulty[difficulty].value
+    difficulty_id = difficulty.value
     score_uuid = str(uuid.uuid4())
     end_time_utc = datetime.now(timezone.utc)
-
     score_frame_bytes = io.BytesIO()
     numpy.savez(score_frame_bytes, frame_slice=score_frame)
     score_frame_bytes.seek(0)
@@ -422,18 +438,25 @@ def write_score(
         ":clear_type,"
         ":failure_measure,"
         ":failure_note,"
-        ":end_time_utc"
+        ":end_time_utc,"
+        ":total_score,"
+        ":miss_count"
         ")"
     )
     user_db_connection = sqlite3.connect(CONSTANTS.USER_DB)
     db_cursor = user_db_connection.cursor()
-    log.info("TRYING SQLITE WRITE")
+    artist, title = get_artist_and_title_by_textage_id(textage_id)
+    log.info(
+        f"Provided score for Artist: {artist} Title: {title} Difficulty: {difficulty.name}"
+    )
+    log.info(f"Writing to sqlite: {textage_id} {difficulty} {score}")
+    return
     db_cursor.execute(
         score_query,
         {
             "score_uuid": score_uuid,
             "session_uuid": session_uuid,
-            "textage_id": referenced_textage_id,
+            "textage_id": textage_id,
             "difficulty_id": difficulty_id,
             "perfect_great": score.fgreat,
             "great": score.great,
@@ -448,6 +471,8 @@ def write_score(
             "failure_measure": None,
             "failure_note": None,
             "end_time_utc": end_time_utc,
+            "total_score": score.total_score,
+            "miss_count": score.miss_count,
         },
     )
     ocr_query = (
@@ -461,72 +486,41 @@ def write_score(
             "score_uuid": score_uuid,
             "result_screengrab": score_frame_bytes.getvalue(),
             "title_scaled": None,
-            "en_title_ocr": title.en_title,
-            "en_artist_ocr": title.en_artist,
-            "jp_title_ocr": title.jp_title,
-            "jp_artist_ocr": title.jp_artist,
+            "en_title_ocr": ocr_titles.en_title,
+            "en_artist_ocr": ocr_titles.en_artist,
+            "jp_title_ocr": ocr_titles.jp_title,
+            "jp_artist_ocr": ocr_titles.jp_artist,
         },
     )
     user_db_connection.commit()
     return None
 
 
-def read_tiebreak_data(metadata_titles: set[str]) -> list[tuple[str, str, str]]:
+def read_notes(textage_id: str, difficulty_id: int) -> int:
+    query = (
+        "select sdm.notes "
+        "from song_difficulty_metadata sdm "
+        "join songs songs on sdm.textage_id = songs.textage_id "
+        f"where songs.textage_id = '{textage_id}' "
+        f"and sdm.difficulty_id = {difficulty_id} "
+    )
+    app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
+    db_cursor = app_db_connection.cursor()
+    results = db_cursor.execute(query).fetchall()
+    return results[0][0]
+
+
+def read_tiebreak_data(metadata_titles: set[str]) -> list[tuple[str, str, str, str]]:
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     db_cursor = app_db_connection.cursor()
     ids_as_string = ",".join([f"'{id}'" for id in metadata_titles])
     query = (
-        "select textage_id, artist, title "
+        "select textage_id, artist, title, genre "
         "from songs "
         f"where textage_id in ({ids_as_string})"
     )
     results = db_cursor.execute(query).fetchall()
     return results
-
-
-def metadata_lookup_tiebreaker(
-    metadata_titles: set[str], ocr_titles: OCRSongTitles
-) -> str:
-    """
-    Calculates the levenshtein distance on songs that match
-    play metadata (note count, difficulty, bpm) versus
-    what is provided by our OCR library to determine
-    the song title.
-
-    In cases of ties, this raises an exception, indicating
-    we have missed some special case or overlap, or that
-    OCR is underperforming or outputting garbage.
-
-    https://en.wikipedia.org/wiki/Levenshtein_distance
-    """
-    lowest_score = -1
-    lowest_textage_id = None
-    lowest_has_tie = False
-    results = read_tiebreak_data(metadata_titles)
-    scores = {}
-    for textage_id, artist, title in results:
-        score = polyleven.levenshtein(ocr_titles.en_artist, artist)
-        score += polyleven.levenshtein(ocr_titles.en_title, title)
-        score += polyleven.levenshtein(ocr_titles.jp_artist, artist)
-        score += polyleven.levenshtein(ocr_titles.jp_title, title)
-        scores[textage_id] = score
-    # We only care about ties for the lowest score
-    # so we sort to get the elements in ascending score order
-    sorted_scores = {t: scores[t] for t in sorted(scores, key=scores.get)}  # type: ignore
-    for textage_id, score in sorted_scores.items():
-        if lowest_score != -1 and score == lowest_score:
-            lowest_has_tie = True
-        if lowest_score == -1 or score < lowest_score:
-            lowest_textage_id = textage_id
-            lowest_score = score
-    if lowest_has_tie or lowest_textage_id is None:
-        raise RuntimeError(
-            "Couldn't figure out song title from OCR data and metadata. "
-            f"song metadata: {metadata_titles} "
-            f"ocr data: {ocr_titles} "
-            f"similarity scores: {sorted_scores} "
-        )
-    return lowest_textage_id
 
 
 def get_scores_by_session(session_id: str) -> list[tuple]:
@@ -544,7 +538,9 @@ def get_scores_by_session(session_id: str) -> list[tuple]:
         "score.end_time_utc score_time, "
         "difficulty.difficulty difficulty, "
         "songs.title title, "
-        "third_party_song_ids.third_party_id kamaitachi_id "
+        "third_party_song_ids.third_party_id kamaitachi_id, "
+        "score.total_score total_score, "
+        "score.miss_count miss_count "
         "from user.session session "
         "join user.score score on score.session_uuid=session.session_uuid "
         "join songs songs on songs.textage_id=score.textage_id "
@@ -559,7 +555,7 @@ def get_scores_by_session(session_id: str) -> list[tuple]:
     return [result for result in results]
 
 
-def add_alternate_difficulty_table(table_entries: list[tuple]):
+def add_alternate_difficulty_table(table_entries: list[tuple]) -> None:
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     app_db_cursor = app_db_connection.cursor()
     query = (
@@ -575,3 +571,11 @@ def add_alternate_difficulty_table(table_entries: list[tuple]):
     for entry in table_entries:
         app_db_cursor.execute(query, entry)
     app_db_connection.commit()
+
+
+def get_artist_and_title_by_textage_id(textage_id: str) -> tuple[str, str]:
+    app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
+    app_db_cursor = app_db_connection.cursor()
+    query = f"select artist, title from songs where textage_id='{textage_id}';"
+    results = app_db_cursor.execute(query)
+    return results.fetchone()

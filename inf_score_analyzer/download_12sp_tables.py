@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import logging
-import requests
+import requests  # type: ignore
 
 from . import constants as CONSTANTS
 from . import sqlite_client
-from .local_dataclasses import Difficulty, ClearType, SongReference
+from .song_reference import SongReference
+from .local_dataclasses import Difficulty, ClearType
 
 log = logging.getLogger(__name__)
 
@@ -16,8 +17,9 @@ def write_table_to_sqlite(
     data_to_write: list[tuple] = []
     for entry in table.keys():
         if entry[0] not in song_reference.by_title:
-            log.warning(
-                f"Skipping writing 12SP for {entry[0]}, could not find in song reference"
+            log.debug(
+                f"Skipping writing 12SP for {entry[0]}, "
+                "could not find in INFINITAS song reference"
             )
             continue
 
@@ -49,13 +51,13 @@ def transform_table_json(
     by_title_and_difficulty: dict[tuple[str, Difficulty], dict[ClearType, str]] = {}
     for entry in table_json:
         if "difficulty" not in entry:
-            log.warning(f"Skipping 12SP {entry['name']}, missing difficulty.")
+            log.debug(f"Skipping 12SP {entry['name']}, missing difficulty.")
             continue
         if entry["normal"] == "":
-            log.warning(f"Skipping 12SP {entry['name']}, missing normal ranking.")
+            log.debug(f"Skipping 12SP {entry['name']}, missing normal ranking.")
             continue
         if entry["hard"] == "":
-            log.warning("Skipping 12SP {entry['name']}, missing hard ranking.")
+            log.debug(f"Skipping 12SP {entry['name']}, missing hard ranking.")
             continue
         song_difficulty = difficulty_lookup_table[entry["difficulty"]]
         name = entry["name"].strip()

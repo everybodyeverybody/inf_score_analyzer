@@ -2,7 +2,7 @@
 
 ## Description
 
-A python script/application that reads in video data of beatmania IIDX INFINITAS sessions.
+A python script that reads in score data from screenshots or video data of beatmania IIDX INFINITAS sessions.
 
 ## Intent
 
@@ -14,6 +14,13 @@ specifically the `Prior Work and Tech Constraints` section.
 - a raw, HDMI-based feed of a beatmania IIDX INFINTAS session, 
 either via capture card or software
 
+OR 
+
+- raw screenshots provided by beatmania IIDX infinitas.
+
+You can pres F12 during a beatmania IIDX session and it will
+dump the screen to the game's Screenshots directory where it is installed.
+
 ## Setup
 
 - `python3 -m venv .venv`
@@ -23,7 +30,7 @@ either via capture card or software
 ## Usage 
 
 ```
-python3 -m inf_score_analyzer
+python3 -m inf_score_analyzer <paths to screenshots, can take wildcard paths>
 ```
 
 ## What This Does
@@ -31,22 +38,23 @@ python3 -m inf_score_analyzer
 - download external song metadata from textage.cc
 - set up/refresh any locally configured sqlite3 databases for the app
 - load in configuration metadata from `data/`
-- open the first available video input device on the computer
-- loop over frames received from the input device, providing metadata every 300 seconds
-- on quitting, attempts to export the current session's scores to [kamaitachi](https://kamai.tachi.ac/)
-
-During the video loop, if the application encouters frames that appear to be
-a beatmania IIDX INFINITAS play session followed by a score screen, it will
-capture data from the session and write this data to the sqlite3 database.
+- if using a video feed:
+    - open the first available video input device on the computer
+    - loop over frames received from the input device, providing metadata every 300 seconds
+- if using screenshots:
+    - attempts to figure out if the screenshot is a score result or song select frame
+    - reads score data from the screenshot
+- writes score data to a local sqlite3 database
+- on exit from video or finishing reading all screenshots, attempts to export the current session's scores to [kamaitachi](https://kamai.tachi.ac/)
 
 ## Caveats
 
-This was written on an Intel Mac, and so has only been really tested there.
+This was written for Linux/Mac, as I used them as secondary/stream computers for my windows gaming sessions.
 
 This is functionally complete for myself, but I wanted to put it out there as proof.
 
-This does support 1P, 2P and DP sessions, but assumes that one is using
-the default window arrangement. The HD update and my general lack of not playing
+This assumes that one is using the default window arrangement. 
+The HD update and my general lack of not playing
 2P or DP has delayed setting the needed screen pixel constants for that in some 
 parts of code, but will be handled in future work.
 
