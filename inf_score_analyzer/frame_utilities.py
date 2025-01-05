@@ -2,22 +2,25 @@
 import os
 import logging
 from pathlib import Path
+from typing import Callable
 from datetime import datetime
-from typing import Optional, Callable
 
-import numpy
+import numpy  # type: ignore
 import cv2 as cv  # type: ignore
-from numpy.typing import NDArray
+from numpy.typing import NDArray  # type: ignore
 from .local_dataclasses import NumberArea
 from .constants import (
     QUANTIZED_WHITE_MAX,
     QUANTIZED_BLACK_MIN,
     BRIGHTNESS_HALFWAY_POINT,
     DATA_DIR,
+    GRAYSCALE_BLUE,
+    GRAYSCALE_GREEN,
+    GRAYSCALE_RED,
 )
 from .local_dataclasses import GameStatePixel, Point
 
-from line_profiler import profile
+from line_profiler import profile  # type: ignore
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +115,105 @@ def get_array_as_ascii_art(block: NDArray, use_black: bool = False) -> str:
     return output_string
 
 
+def dump_colors(
+    frame: NDArray,
+    top_left_y: int,
+    top_left_x: int,
+    bottom_right_y: int,
+    bottom_right_x: int,
+) -> set[tuple[int, int, int]]:
+    dumped_colors: set[tuple[int, int, int]] = set([])
+    for y in range(top_left_y, bottom_right_y):
+        for x in range(top_left_x, bottom_right_x):
+            t = (
+                int(frame[y][x][0]),
+                int(frame[y][x][1]),
+                int(frame[y][x][2]),
+            )
+            dumped_colors.add(t)
+    return dumped_colors
+
+
+def flatten_difficulty_gradients(
+    frame: NDArray,
+    top_left_y: int,
+    top_left_x: int,
+    bottom_right_y: int,
+    bottom_right_x: int,
+    gradient: set[tuple[int, int, int]],
+    match_level=255,
+    miss_level=0,
+) -> None:
+    for y in range(top_left_y, bottom_right_y):
+        for x in range(top_left_x, bottom_right_x):
+            pixel: tuple[int, int, int] = (
+                int(frame[y][x][0]),
+                int(frame[y][x][1]),
+                int(frame[y][x][2]),
+            )
+            if pixel in gradient:
+                frame[y][x][0] = match_level
+                frame[y][x][1] = match_level
+                frame[y][x][2] = match_level
+            else:
+                frame[y][x][0] = miss_level
+                frame[y][x][1] = miss_level
+                frame[y][x][2] = miss_level
+
+
+def polarize_area(
+    frame: NDArray,
+    top_left_y: int,
+    top_left_x: int,
+    bottom_right_y: int,
+    bottom_right_x: int,
+    cutoff_bgr: tuple[int, int, int] = (145, 145, 145),
+    cutoff_bgr_below_color: tuple[int, int, int] = (255, 255, 255),
+    cutoff_bgr_above_color: tuple[int, int, int] = (0, 0, 0),
+) -> NDArray:
+    for y in range(top_left_y, bottom_right_y):
+        for x in range(top_left_x, bottom_right_x):
+            if (
+                frame[y][x][0] < cutoff_bgr[0]
+                and frame[y][x][1] < cutoff_bgr[1]
+                and frame[y][x][2] < cutoff_bgr[2]
+            ):
+                frame[y][x][0] = cutoff_bgr_below_color[0]
+                frame[y][x][1] = cutoff_bgr_below_color[1]
+                frame[y][x][2] = cutoff_bgr_below_color[2]
+            else:
+                frame[y][x][0] = cutoff_bgr_above_color[0]
+                frame[y][x][1] = cutoff_bgr_above_color[1]
+                frame[y][x][2] = cutoff_bgr_above_color[2]
+    return frame
+
+
+def grayscale_area(
+    frame: NDArray,
+    top_left_y: int,
+    top_left_x: int,
+    bottom_right_y: int,
+    bottom_right_x: int,
+    keep_bright_whites: bool = True,
+) -> NDArray:
+    """
+    reference: https://scikit-image.org/docs/0.25.x/auto_examples/color_exposure/plot_rgb_to_gray.html
+    """
+    for y in range(top_left_y, bottom_right_y):
+        for x in range(top_left_x, bottom_right_x):
+            point = Point(y=y, x=x)
+            if keep_bright_whites and is_white(frame, point):
+                continue
+            gb = frame[y][x][0] * GRAYSCALE_BLUE
+            gg = frame[y][x][1] * GRAYSCALE_GREEN
+            gr = frame[y][x][2] * GRAYSCALE_RED
+            grayscale_y = int((gb + gg + gr) / 3)
+            frame[y][x][0] = grayscale_y
+            frame[y][x][1] = grayscale_y
+            frame[y][x][2] = grayscale_y
+    return frame
+
+
 def read_pixel(block: NDArray, point: Point) -> list:
     # TODO: only run if debug logging is on
     # log.debug(f"{point} {block[point.y][point.x][0:3]}")
@@ -119,6 +221,13 @@ def read_pixel(block: NDArray, point: Point) -> list:
 
 
 def is_white_pixel(rgb_or_bgr: list) -> bool:
+    log.debug(
+        "{} {} {}".format(
+            rgb_or_bgr[0] >= QUANTIZED_WHITE_MAX,
+            rgb_or_bgr[1] >= QUANTIZED_WHITE_MAX,
+            rgb_or_bgr[2] >= QUANTIZED_WHITE_MAX,
+        )
+    )
     return (
         rgb_or_bgr[0] >= QUANTIZED_WHITE_MAX
         and rgb_or_bgr[1] >= QUANTIZED_WHITE_MAX
@@ -142,53 +251,84 @@ def is_black(block: NDArray, point: Point) -> bool:
     return is_black_pixel(read_pixel(block, point))
 
 
-def is_bright_pixel(rgb_or_bgr: list) -> bool:
+def is_bright_pixel(rgb_or_bgr: list, brightness_cutoff: int = 2) -> bool:
     brightness_check = 0
     log.debug(f"{rgb_or_bgr}")
     for value in rgb_or_bgr:
         if value >= BRIGHTNESS_HALFWAY_POINT:
-            log.debug(f"{value} >= {BRIGHTNESS_HALFWAY_POINT}")
             brightness_check += 1
-    log.debug(f"{brightness_check} >= 2")
-    return brightness_check >= 2
+        log.debug(f"{value} >= {BRIGHTNESS_HALFWAY_POINT}")
+    log.debug(f"BRIGHTNESS CHECK: {brightness_check} >= {brightness_cutoff}")
+    return brightness_check >= brightness_cutoff
 
 
-def is_bright(block: NDArray, point: Point) -> bool:
-    return is_bright_pixel(read_pixel(block, point))
+def is_bright(block: NDArray, point: Point, brightness_cutoff: int = 2) -> bool:
+    return is_bright_pixel(read_pixel(block, point), brightness_cutoff)
+
+
+def check_point_color(
+    frame: NDArray, point: Point, color_bgr: tuple[int, int, int], tolerance: int = 15
+):
+    game_state_pixel = GameStatePixel(
+        y=point.y, x=point.x, b=color_bgr[0], g=color_bgr[1], r=color_bgr[2]
+    )
+    return check_pixel_color_in_frame(frame, game_state_pixel, tolerance)
 
 
 @profile
 def check_pixel_color_in_frame(
     frame: NDArray,
     pixel: GameStatePixel,
-    specific_color: Optional[tuple[int, int, int]] = None,
     tolerance: int = 15,
 ) -> bool:
-    if specific_color is None:
+    if pixel.r >= 0:
         max_red = pixel.r + tolerance
         min_red = pixel.r - tolerance
+    else:
+        max_red = 255
+        min_red = 0
+
+    if pixel.g >= 0:
         max_green = pixel.g + tolerance
         min_green = pixel.g - tolerance
+    else:
+        max_green = 255
+        min_green = 0
+
+    if pixel.b >= 0:
         max_blue = pixel.b + tolerance
         min_blue = pixel.b - tolerance
     else:
-        max_red = specific_color[2] + tolerance
-        min_red = specific_color[2] - tolerance
-        max_green = specific_color[1] + tolerance
-        min_green = specific_color[1] - tolerance
-        max_blue = specific_color[0] + tolerance
-        min_blue = specific_color[0] - tolerance
-    if (
+        max_blue = 255
+        min_blue = 0
+
+    blue_match: bool = (
         frame[pixel.y][pixel.x][0] >= min_blue
         and frame[pixel.y][pixel.x][0] <= max_blue
-        and frame[pixel.y][pixel.x][1] >= min_green
+    )
+    green_match: bool = (
+        frame[pixel.y][pixel.x][1] >= min_green
         and frame[pixel.y][pixel.x][1] <= max_green
-        and frame[pixel.y][pixel.x][2] >= min_red
-        and frame[pixel.y][pixel.x][2] <= max_red
-    ):
+    )
+    red_match: bool = (
+        frame[pixel.y][pixel.x][2] >= min_red and frame[pixel.y][pixel.x][2] <= max_red
+    )
+
+    if red_match and blue_match and green_match:
         result = True
     else:
         result = False
+
+    output = "frame pixel: {}, b:{}:{} g:{}:{} r:{}:{}".format(
+        pixel,
+        frame[pixel.y][pixel.x][0],
+        blue_match,
+        frame[pixel.y][pixel.x][1],
+        green_match,
+        frame[pixel.y][pixel.x][2],
+        red_match,
+    )
+    log.debug(output)
     return result
 
 
@@ -198,7 +338,7 @@ def get_numbers_from_area(
     block_reader: Callable,
 ) -> list[int]:
     numbers: list[int] = []
-    log.debug(f"Using {area.name} for coordinates")
+    log.debug(f"Using {area.name} for coordinates: {area}")
     for row in range(area.rows):
         number: int = 0
         row_start_y = area.start_y + (row * area.y_offset)
@@ -221,3 +361,12 @@ def get_numbers_from_area(
             number += read_number * place
         numbers.append(number)
     return numbers
+
+
+def show_frame(frame: NDArray) -> None:
+    key = "s"
+    log.info(f"PRESS {key} TO CLOSE PREVIEW")
+    cv.imshow("Display", frame)
+    k = cv.waitKey(0)
+    if k == ord(key):
+        return

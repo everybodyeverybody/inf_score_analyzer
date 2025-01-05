@@ -16,7 +16,7 @@ def test_play_state():
 
 def test_score_state():
     frame = cv.imread(
-        "tests/hd_score_images/P1_FAILED_1090_notes_506_209_84_14_31_121_172.png"
+        "tests/hd_score_images/rbwafter-SP-A-10-P1-FAILED-1090-notes-506-209-84-14-31-121-172-1221-45.png"
     )
     assert GameState.P1_SCORE == game_state_frame_processor.get_game_state_from_frame(
         frame, ALL_STATE_PIXELS

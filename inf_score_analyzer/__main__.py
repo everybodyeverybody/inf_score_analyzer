@@ -2,6 +2,7 @@
 import uuid
 import logging
 import argparse
+import traceback
 from typing import Any
 from pathlib import Path
 from contextlib import contextmanager
@@ -18,16 +19,18 @@ from . import game_state_pixels
 from . import play_frame_processor
 from . import score_frame_processor
 from .game_state_frame_processor import get_game_state_from_frame
+from . import song_select_frame_processor
+
 from . import download_12sp_tables
 
 from . import constants as CONSTANTS
 from .local_dataclasses import (
     GameState,
     GameStatePixel,
-    SongReference,
     VideoProcessingState,
 )
-from .kamaitachi_client import export_to_kamaitachi
+from .song_reference import SongReference
+from . import kamaitachi_client
 
 
 def process_video(
@@ -102,36 +105,14 @@ def video_processing_loop(
 
 def load_video_source(args: argparse.Namespace) -> cv.VideoCapture:
     # TODO: figure out how to enumerate system webcam IDs/hardware
-    log.info("Reading frames from default webcam")
-    return cv.VideoCapture(0)
+    log.info(f"Reading frames from video source: {args.video_source_id}")
+    return cv.VideoCapture(args.video_source_id)
 
 
-def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    # TODO: figure out how to query for the correct video device
-    parser.add_argument(
-        "--png-file",
-        action="extend",
-        type=str,
-        nargs="*",
-        dest="png_files",
-        help="A png of the score screen",
-        default=[],
-    )
-    parser.add_argument(
-        "--force-update",
-        action="store_const",
-        dest="force_update",
-        const=True,
-        help="Will force a song metadata DB update regardless of recency",
-        default=False,
-    )
-    return parser.parse_args()
-
-
-def end_session(session_uuid: str) -> None:
+def shutdown(session_uuid: str) -> None:
+    log.info(f"Closing session {session_uuid} and shutting down")
     sqlite_client.write_session_end(session_uuid)
-    export_to_kamaitachi(session_uuid)
+    kamaitachi_client.export_to_kamaitachi(session_uuid)
 
 
 def start_session() -> str:
@@ -151,49 +132,44 @@ def video_capture(video_source_id: int = 0) -> Any:
 
 
 def read_scores_from_pngs(
-    png_files: list[Path], state_pixels: list[GameStatePixel]
+    png_files: list[Path],
+    state_pixels: list[GameStatePixel],
+    session_uuid: str,
+    song_reference: SongReference,
 ) -> None:
-    for image in png_files:
-        frame = cv.imread(str(image.absolute()))
-        # TODO: fix SELECT_OPTIONS
-        # TODO: fix DP_PLAY
-        # TODO: fix alternative layouts
-        # TODO: have this use the same code path as the video loop
-        game_state: GameState = get_game_state_from_frame(frame, state_pixels)
-        is_double = False
-        left_side = True
-        log.info(f"png game state: {game_state}")
-        if game_state in game_state_pixels.SCORE_STATES:
-            logging.info(f"reading score from {image}")
-            # TODO: fix this
-            score = score_frame_processor.get_score_from_result_screen(
-                frame, left_side, is_double
-            )
-            notes = score_frame_processor.get_note_count(frame)
-            log.info(f"returned score: {score}")
-            log.info(f"returned notes: {notes}")
-        elif game_state in game_state_pixels.PLAY_STATES:
-            player, single_or_double, _ = game_state.value.split("_")
-            if player == "2P":
-                left_side = False
-            if single_or_double == "DP":
-                is_double = True
-            min_bpm, max_bpm = play_frame_processor.read_bpm(
-                frame, left_side, is_double
-            )
-            play_level = play_frame_processor.read_play_level(
-                frame, left_side, is_double
-            )
-            difficulty = play_frame_processor.read_play_difficulty(
-                frame, left_side, is_double
-            )
-            song_titles = play_frame_processor.get_ocr_song_title_from_play_frame(
-                frame, left_side, is_double
-            )
-            log.info(f"returned bpm: {min_bpm} {max_bpm}")
-            log.info(f"play level: {play_level}")
-            log.info(f"play difficulty: {difficulty}")
-            log.info(f"song titles: {song_titles}")
+    with ProcessPoolExecutor(max_workers=1) as ocr:
+        for image in png_files:
+            logging.info(f"Reading score from {image}")
+            frame = cv.imread(str(image.absolute()))
+            game_state: GameState = get_game_state_from_frame(frame, state_pixels)
+            log.debug(f"PNG GAME STATE: {game_state}")
+            try:
+                if game_state in game_state_pixels.SCORE_STATES:
+                    textage_id, score, difficulty, ocr_titles = (
+                        score_frame_processor.read_score_and_song_metadata(
+                            frame, song_reference, game_state, ocr
+                        )
+                    )
+                elif game_state in game_state_pixels.SONG_SELECT_STATES:
+                    textage_id, score, difficulty, ocr_titles = (
+                        song_select_frame_processor.read_score_and_song_metadata(
+                            frame, song_reference
+                        )
+                    )
+                else:
+                    log.error(
+                        f"Could not read song select or score result from {image}, continuing"
+                    )
+                    continue
+                sqlite_client.write_score(
+                    session_uuid, textage_id, score, difficulty, ocr_titles, frame
+                )
+            except Exception as e:
+                log.error(
+                    f"Could not determine score from {image} and skipping : {e} : {traceback.format_exc()}"
+                )
+                continue
+    return
 
 
 def load_pngs(png_files: list[str]) -> list[Path]:
@@ -202,36 +178,80 @@ def load_pngs(png_files: list[str]) -> list[Path]:
         absolute_location = Path(filename).absolute()
         if absolute_location.exists():
             pngs.append(absolute_location)
+        else:
+            log.warning(
+                f"Could not find screenshot file {absolute_location}, skipping."
+            )
     if pngs:
-        log.info(f"Reading image files from {pngs}")
+        log.info(f"Reading game score screenshots from {pngs}")
     return pngs
 
 
-def startup() -> tuple[list[Path], SongReference]:
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--force-update",
+        action="store_true",
+        help="Will force a song metadata DB update regardless of recency",
+        dest="force_update",
+    )
+    parser.add_argument(
+        "--video-mode",
+        action="store_true",
+        help=(
+            "Sets script to run scanning a raw 1920x1080 video source "
+            "for the game inputs instead of screenshots."
+        ),
+        dest="video_mode",
+    )
+    parser.add_argument(
+        "--video-source-id",
+        type=int,
+        help=(
+            "The ID for the video input device. Defaults to 0, "
+            "the first input device found on the system."
+        ),
+        default=0,
+        dest="video_source_id",
+    )
+    parser.add_argument(
+        "screenshots", help=("A list of paths to screenshots."), nargs="*"
+    )
+    return parser.parse_args()
+
+
+def startup() -> tuple[argparse.Namespace, SongReference]:
     args = parse_arguments()
     sqlite_client.sqlite_setup(args.force_update)
     song_reference = sqlite_client.read_song_data_from_db()
-    png_paths = load_pngs(args.png_files)
     download_12sp_tables.download_and_normalize_data(song_reference)
-    return png_paths, song_reference
+    return args, song_reference
 
 
 def main() -> None:
-    png_paths, song_reference = startup()
-    if png_paths:
-        read_scores_from_pngs(png_paths, game_state_pixels.ALL_STATE_PIXELS)
-        return
-    source_id = 0
-    try:
-        session_uuid = start_session()
-        video_processing_loop(
-            source_id, game_state_pixels.ALL_STATE_PIXELS, session_uuid, song_reference
-        )
-    except KeyboardInterrupt:
-        pass
-    finally:
-        log.info("closing session and shutting down")
-        end_session(session_uuid)
+    args, song_reference = startup()
+    log.info(f"Running with arguments: {args}")
+    session_uuid = start_session()
+    if args.video_mode:
+        try:
+            video_processing_loop(
+                args.video_source_id,
+                game_state_pixels.ALL_STATE_PIXELS,
+                session_uuid,
+                song_reference,
+            )
+        except KeyboardInterrupt:
+            pass
+        finally:
+            shutdown(session_uuid)
+    else:
+        try:
+            pngs = load_pngs(args.screenshots)
+            read_scores_from_pngs(
+                pngs, game_state_pixels.ALL_STATE_PIXELS, session_uuid, song_reference
+            )
+        finally:
+            shutdown(session_uuid)
     return
 
 

@@ -4,7 +4,7 @@ from typing import Tuple
 from concurrent.futures import ProcessPoolExecutor
 
 import pytesseract  # type: ignore
-from numpy.typing import NDArray
+from numpy.typing import NDArray  # type: ignore
 
 from .frame_utilities import (
     get_rectanglular_subsection_from_frame,
@@ -12,15 +12,17 @@ from .frame_utilities import (
     read_pixel,
     dump_to_png,
     get_numbers_from_area,
+    polarize_area,
 )
 from . import constants as CONSTANTS
 from .local_dataclasses import (
     Point,
+    Difficulty,
     OCRSongTitles,
     VideoProcessingState,
     PlayMetadata,
-    SongReference,
 )
+from .song_reference import SongReference
 
 log = logging.getLogger(__name__)
 
@@ -182,25 +184,16 @@ def get_ocr_song_title_from_play_frame(
         artist_bottom_right_y = 120
     else:
         raise RuntimeError("2p and dp not yet supported")
-    grey_r = 145
-    grey_g = 145
-    grey_b = 145
-    for y in range(top_left_y, artist_bottom_right_y):
-        for x in range(top_left_x, bottom_right_x):
-            if (
-                frame[y][x][0] < grey_b
-                and frame[y][x][1] < grey_g
-                and frame[y][x][2] < grey_r
-            ):
-                frame[y][x][0] = 255
-                frame[y][x][1] = 255
-                frame[y][x][2] = 255
-            else:
-                frame[y][x][0] = 0
-                frame[y][x][1] = 0
-                frame[y][x][2] = 0
+    # TODO: extract this
+    polarized_frame = polarize_area(
+        frame, top_left_y, top_left_x, artist_bottom_right_y, bottom_right_x
+    )
     song_frame_slice = get_rectanglular_subsection_from_frame(
-        frame, top_left_y, top_left_x, song_title_bottom_right_y, bottom_right_x
+        polarized_frame,
+        top_left_y,
+        top_left_x,
+        song_title_bottom_right_y,
+        bottom_right_x,
     )
     artist_frame_slice = get_rectanglular_subsection_from_frame(
         frame,
@@ -296,7 +289,7 @@ def read_side_and_doubles(play_frame: NDArray) -> Tuple[bool, bool]:
     return True, False
 
 
-def read_play_difficulty(frame: NDArray, left_side: bool, is_double) -> str:
+def read_play_difficulty(frame: NDArray, left_side: bool, is_double) -> Difficulty:
     single_or_double = "SP"
     if is_double:
         raise RuntimeError("double not yet supported")
@@ -322,7 +315,7 @@ def read_play_difficulty(frame: NDArray, left_side: bool, is_double) -> str:
             known_difficulty = "LEGGENDARIA"
     log.debug(f"difficulty color {color}")
     log.debug(f"difficulty {known_difficulty}")
-    return f"{single_or_double}_{known_difficulty}"
+    return Difficulty[f"{single_or_double}_{known_difficulty}"]
 
 
 def read_play_lifebar_type(
@@ -526,7 +519,7 @@ def update_video_processing_state(
         and v.max_bpm is not None
     ):
         v.metadata_title = song_reference.resolve_by_play_metadata(
-            (v.difficulty, v.level),
+            (v.difficulty.name, v.level),
             (v.min_bpm, v.max_bpm),  # type: ignore
         )
     # know layout but not song title ocr data

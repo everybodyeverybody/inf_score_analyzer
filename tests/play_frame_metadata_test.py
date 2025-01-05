@@ -7,6 +7,7 @@ from pathlib import Path
 import cv2 as cv  # type: ignore
 
 from inf_score_analyzer import play_frame_processor
+from inf_score_analyzer.local_dataclasses import Difficulty
 
 PLAY_FILES_DIR = "./tests/hd_play_images/"
 PLAY_FILES = [Path(file).absolute() for file in os.scandir(PLAY_FILES_DIR)]
@@ -41,7 +42,7 @@ for file in PLAY_FILES:
         "min_bpm": min_bpm,
         "max_bpm": max_bpm,
         "level": level,
-        "difficulty": f"{sp_dp}_{difficulty}",
+        "difficulty": Difficulty[f"{sp_dp}_{difficulty}"],
         "left_side": left_side,
         "is_doubles": is_doubles,
     }

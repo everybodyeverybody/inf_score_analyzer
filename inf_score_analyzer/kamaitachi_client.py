@@ -8,11 +8,12 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 
-import requests
+import requests  # type: ignore
 
 from . import sqlite_client
 from . import constants as CONSTANTS
-from .local_dataclasses import ClearType, SongReference
+from .local_dataclasses import ClearType
+from .song_reference import SongReference
 
 log = logging.getLogger(__name__)
 
@@ -34,8 +35,9 @@ def submit_score_request(scores: dict[str, Any]) -> None:
                 break
             time.sleep(5)
     else:
-        log.info(response.status_code)
-        log.info(response.text)
+        log.error(
+            f"Submit score request failed: {response.status_code} {response.text}"
+        )
     return
 
 
@@ -70,13 +72,13 @@ def build_score_entry(score: tuple) -> dict[str, Any]:
         "judgements": {},
         "optional": {},
     }
-    pgreat, great, good, bad, poor, fast, slow = score[1:8]
-    total_score = great + (pgreat * 2)
     clear_type = score[8]
     time = score[9]
     difficulty = score[10].split("_")[1]
     title = score[11]
     kt_id = score[12]
+    total_score = score[13]
+    miss_count = score[14]
     kt_lamp = translate_clear_type_to_lamp(clear_type)
     play_datetime = datetime.fromisoformat(time)
     kt_time_achieved_ms = int(play_datetime.timestamp() * 1000)
@@ -86,17 +88,18 @@ def build_score_entry(score: tuple) -> dict[str, Any]:
     base_score["identifier"] = kt_id
     base_score["difficulty"] = difficulty
     base_score["timeAchieved"] = kt_time_achieved_ms
-    base_score["judgements"] = {
-        "pgreat": pgreat,
-        "great": great,
-        "good": good,
-        "bad": bad,
-        "poor": poor,
-    }
-    base_score["optional"] = {
-        "fast": fast,
-        "slow": slow,
-    }
+    if sum(score[1:8]) != 0:
+        pgreat, great, good, bad, poor, fast, slow = score[1:8]
+        base_score["judgements"] = {
+            "pgreat": pgreat,
+            "great": great,
+            "good": good,
+            "bad": bad,
+            "poor": poor,
+        }
+        base_score["optional"] = {"fast": fast, "slow": slow, "bp": miss_count}
+    else:
+        base_score["optional"] = {"bp": miss_count}
     return base_score
 
 
@@ -120,7 +123,7 @@ def transform_scores(scores: list[tuple]) -> tuple[dict[str, Any], ...]:
 
 
 def export_to_kamaitachi(session_id: str) -> None:
-    if CONSTANTS.TACHI_API_TOKEN == "":
+    if not CONSTANTS.TACHI_API_TOKEN:
         log.error(
             "Kamaitachi export failed, must set TACHI_API_TOKEN in env for script"
         )
@@ -187,6 +190,9 @@ def normalize_textage_to_kamaitachi(
         "uәn": "2271",
         # new unique character! need to fix the encoding here
         "ジオメトリック�塔eィーパーティー": "2352",
+        # another new unique quoting here
+        'ピアノ協奏曲第１番"蠍火" (BlackY Remix)': "1905",
+        "≡＋≡": "2161",
     }
 
     kamaitachi_titles = {}
@@ -260,7 +266,7 @@ def normalize_textage_to_kamaitachi(
             mapping[textage_id] = special_cases[title]
             continue
         raise RuntimeError(
-            f"Could not determine kamaitachi ID for textage infinitas song: {textage_id} {entry}"
+            f"Could not determine kamaitachi ID for textage infinitas song: {textage_id} {title}"
         )
     log.info(f"Done normalizing data. Found {len(mapping)} matching songs.")
     return mapping

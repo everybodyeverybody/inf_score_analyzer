@@ -4,9 +4,15 @@ from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import Optional
 
-from numpy.typing import NDArray
+from numpy.typing import NDArray  # type: ignore
 
 log = logging.getLogger(__name__)
+
+
+class TitleType(Enum):
+    NORMAL = "NORMAL"
+    INFINITAS = "INFINITAS"
+    LEGGENDARIA = "LEGGENDARIA"
 
 
 class GameState(Enum):
@@ -22,6 +28,26 @@ class GameState(Enum):
     UNKNOWN = "UNKNOWN"
 
 
+class Difficulty(Enum):
+    SP_NORMAL = 2
+    SP_HYPER = 3
+    SP_ANOTHER = 4
+    SP_LEGGENDARIA = 5
+    DP_NORMAL = 7
+    DP_HYPER = 8
+    DP_ANOTHER = 9
+    DP_LEGGENDARIA = 10
+    UNKNOWN = 99
+
+
+class DifficultyType(Enum):
+    NORMAL = 0
+    HYPER = 1
+    ANOTHER = 2
+    LEGGENDARIA = 3
+    UNKNOWN = 99
+
+
 @dataclass
 class GameStatePixel:
     state: GameState = GameState.UNKNOWN
@@ -35,7 +61,7 @@ class GameStatePixel:
 
 @dataclass
 class PlayMetadata:
-    difficulty: str
+    difficulty: Difficulty
     level: int
     lifebar_type: str
     min_bpm: int
@@ -61,28 +87,13 @@ class Score:
     slow: int = 0
     grade: str = "X"
     clear_type: str = "FAILED"
+    total_score: int = 0
+    miss_count: int = 0
 
 
-@dataclass
-class MetadataZone:
-    top_left_y: int = 0
-    bottom_right_y: int = 0
-    top_left_x: int = 0
-    bottom_right_x: int = 0
-    state: str = ""
-    area: str = ""
-
-
-class Difficulty(Enum):
-    SP_NORMAL = 2
-    SP_HYPER = 3
-    SP_ANOTHER = 4
-    SP_LEGGENDARIA = 5
-    DP_NORMAL = 7
-    DP_HYPER = 8
-    DP_ANOTHER = 9
-    DP_LEGGENDARIA = 10
-    UNKNOWN = 99
+class SingleOrDouble(Enum):
+    SP = 2
+    DP = 7
 
 
 class Alphanumeric(Enum):
@@ -103,6 +114,7 @@ class ClearType(Enum):
     HARD = 4
     EXHARD = 5
     FULL_COMBO = 6
+    NO_PLAY = 7
     UNKNOWN = 99
 
 
@@ -245,109 +257,16 @@ class OCRSongTitles:
 
 
 @dataclass
-class SongReference:
-    by_artist: dict[str, set[str]] = field(default_factory=dict)
-    by_difficulty: dict[tuple[str, int], set[str]] = field(default_factory=dict)
-    by_title: dict[str, str] = field(default_factory=dict)
-    by_bpm: dict[tuple[int, int], set[str]] = field(default_factory=dict)
-    by_note_count: dict[int, set[str]] = field(default_factory=dict)
-
-    def resolve_by_play_metadata(
-        self,
-        difficulty_tuple: tuple[str, int],
-        bpm_tuple: tuple[int, int],
-        note_count: Optional[int] = None,
-    ) -> set[str]:
-        difficulty_set = self.by_difficulty[difficulty_tuple]
-        bpm_set = self.by_bpm[bpm_tuple]
-        if note_count is not None:
-            notes_set = self.by_note_count[note_count]
-            found_results = difficulty_set.intersection(bpm_set).intersection(notes_set)
-        else:
-            found_results = difficulty_set.intersection(bpm_set)
-        log.debug(f"PLAY METADATA SET: {found_results}")
-        return found_results
-
-    def _resolve_artist_ocr(
-        self, song_title: OCRSongTitles, found_difficulty_textage_ids: set[str]
-    ) -> Optional[str]:
-        found_artist_textage_id = None
-        found_en_artist_textage_ids = self.by_artist.get(song_title.en_artist, set([]))
-        found_jp_artist_textage_ids = self.by_artist.get(song_title.jp_artist, set([]))
-        found_artist_textage_ids = found_en_artist_textage_ids.union(
-            found_jp_artist_textage_ids
-        )
-        if len(found_artist_textage_ids) > 0:
-            matching_ids = found_artist_textage_ids.intersection(
-                found_difficulty_textage_ids
-            )
-            log.info(f"Matching artist/difficulty IDs: {matching_ids}")
-            if len(matching_ids) == 1:
-                found_artist_textage_id = list(matching_ids)[0]
-        return found_artist_textage_id
-
-    def _resolve_title_ocr(
-        self, song_title: OCRSongTitles, found_difficulty_textage_ids: set[str]
-    ) -> Optional[str]:
-        found_title_textage_id = None
-        found_en_title_textage_id = self.by_title.get(song_title.en_title, None)
-        found_jp_title_textage_id = self.by_title.get(song_title.jp_title, None)
-        log.info(f"found_en_title_textage_id: {found_en_title_textage_id}")
-        log.info(f"found_jp_title_textage_id: {found_jp_title_textage_id}")
-        if found_en_title_textage_id is not None and found_jp_title_textage_id is None:
-            found_title_textage_id = found_en_title_textage_id
-        elif (
-            found_en_title_textage_id is None and found_jp_title_textage_id is not None
-        ):
-            found_title_textage_id = found_jp_title_textage_id
-        elif (
-            found_en_title_textage_id == found_jp_title_textage_id
-            and found_en_title_textage_id is not None
-        ):
-            found_title_textage_id = found_en_title_textage_id
-        return found_title_textage_id
-
-    def resolve_ocr(
-        self, song_title: OCRSongTitles, difficulty: str, level: int
-    ) -> Optional[str]:
-        difficulty_tuple: tuple[str, int] = (difficulty, level)
-        found_difficulty_textage_ids = self.by_difficulty.get(difficulty_tuple, set([]))
-        if not found_difficulty_textage_ids:
-            log.info(f"Could not lookup difficulty {difficulty_tuple}")
-            return None
-        found_title_textage_id = self._resolve_title_ocr(
-            song_title, found_difficulty_textage_ids
-        )
-        log.info(f"found_title_textage_id: {found_title_textage_id}")
-        if (
-            found_title_textage_id is not None
-            and found_title_textage_id in found_difficulty_textage_ids
-        ):
-            return found_title_textage_id
-        else:
-            log.info(f"Could not find {found_title_textage_id} in difficulties")
-
-        found_artist_textage_id = self._resolve_artist_ocr(
-            song_title, found_difficulty_textage_ids
-        )
-        if found_artist_textage_id is not None:
-            return found_artist_textage_id
-        log.debug(f"found_title_textage_id: {found_title_textage_id}")
-        log.info(
-            f"Could not find song_title: {song_title} "
-            f"difficulty: {difficulty_tuple}"
-        )
-        return None
-
-    def resolve_strings(self, title: OCRSongTitles, metadata_titles: set[str]):
-        pass
+class OCRGenres:
+    en_genre: str
+    jp_genre: str
 
 
 @dataclass
 class VideoProcessingState:
     score: Optional[Score] = None
     score_frame: Optional[NDArray] = None
-    difficulty: Optional[str] = None
+    difficulty: Optional[Difficulty] = None
     level: Optional[int] = None
     lifebar_type: Optional[str] = None
     min_bpm: Optional[int] = None

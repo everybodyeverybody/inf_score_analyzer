@@ -2,7 +2,7 @@
 from .local_dataclasses import GameState, GameStatePixel
 
 P1_SCORE_MIDDLE = GameStatePixel(
-    state=GameState.P1_SCORE, name="good_middle_g", y=852, x=300, b=61, g=182, r=229
+    state=GameState.P1_SCORE, name="good_middle_g", y=852, x=300, b=-1, g=182, r=240
 )
 
 P1_SCORE_TIMING_T = GameStatePixel(
@@ -17,14 +17,14 @@ P1_SCORE_TIMING_T = GameStatePixel(
 
 
 P2_SCORE_MIDDLE = GameStatePixel(
-    state=GameState.P2_SCORE, name="good_middle_g", y=852, x=300, b=61, g=182, r=229
+    state=GameState.P2_SCORE, name="good_middle_g", y=852, x=1649, b=-1, g=182, r=240
 )
 
 P2_SCORE_TIMING_T = GameStatePixel(
     state=GameState.P2_SCORE,
     name="timing_t_cross_top",
     y=963,
-    x=113,
+    x=1457,
     b=252,
     g=194,
     r=102,
@@ -110,10 +110,13 @@ PLAY_STATES: set[GameState] = {
     GameState.P1_DP_PLAY,
     GameState.P2_DP_PLAY,
 }
+SONG_SELECT_STATES: set[GameState] = {GameState.SONG_SELECT}
 
 ALL_STATE_PIXELS: list[GameStatePixel] = [
     P1_SCORE_MIDDLE,
     P1_SCORE_TIMING_T,
+    P2_SCORE_MIDDLE,
+    P2_SCORE_TIMING_T,
     P1_SP_NORMAL_PLAY_EXTRA_STAGE,
     P1_SP_PLAY_AREA_BORDER,
     P2_SP_NORMAL_PLAY_EXTRA_STAGE,
