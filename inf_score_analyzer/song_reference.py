@@ -190,26 +190,42 @@ class SongReference:
         """
         lowest_score = -1
         lowest_has_tie = False
-        scores = {}
+        scores: list[tuple[str, int, int, int, int]] = []
         for textage_id, artist, title, genre in tiebreak_data:
-            score = polyleven.levenshtein(ocr_titles.en_artist, artist)
-            score += polyleven.levenshtein(ocr_titles.en_title, title)
-            score += polyleven.levenshtein(ocr_titles.jp_artist, artist)
-            score += polyleven.levenshtein(ocr_titles.jp_title, title)
-            if ocr_genres:
-                score += polyleven.levenshtein(ocr_genres.en_genre, genre)
-                score += polyleven.levenshtein(ocr_genres.jp_genre, genre)
-            scores[textage_id] = score
+            artist_score = 0
+            title_score = 0
+            genre_score = 0
+            if ocr_titles.en_artist:
+                artist_score += polyleven.levenshtein(ocr_titles.en_artist, artist)
+            if ocr_titles.jp_artist:
+                artist_score += polyleven.levenshtein(ocr_titles.jp_artist, artist)
+            if ocr_titles.en_title:
+                title_score += polyleven.levenshtein(ocr_titles.en_title, title)
+            if ocr_titles.jp_title:
+                title_score += polyleven.levenshtein(ocr_titles.jp_title, title)
+            if ocr_genres and ocr_genres.en_genre:
+                genre_score += polyleven.levenshtein(ocr_genres.en_genre, genre)
+            if ocr_genres and ocr_genres.jp_genre:
+                genre_score += polyleven.levenshtein(ocr_genres.jp_genre, genre)
+            total_score = artist_score + title_score + genre_score
+            scores.append(
+                (textage_id, total_score, artist_score, title_score, genre_score)
+            )
 
         # We only care about ties for the lowest score
         # so we sort to get the elements in ascending score order
-        sorted_scores = {t: scores[t] for t in sorted(scores, key=scores.get)}  # type: ignore
+        def _score_tuple_sorter(t: tuple) -> int:
+            return t[1]
+
+        sorted_scores = {
+            score[0]: score[1:] for score in sorted(scores, key=_score_tuple_sorter)
+        }  # type: ignore
         for textage_id, score in sorted_scores.items():
-            if lowest_score != -1 and score == lowest_score:
+            if lowest_score != -1 and score[0] == lowest_score:
                 lowest_has_tie = True
-            if lowest_score == -1 or score < lowest_score:
+            if lowest_score == -1 or score[0] < lowest_score:
                 lowest_textage_id: Optional[str] = textage_id
-                lowest_score = score
+                lowest_score = score[0]
         if lowest_has_tie:
             self.log.error(
                 "Couldn't tiebreak song title from OCR data and metadata. "
