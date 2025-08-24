@@ -450,7 +450,6 @@ def write_score(
         f"Provided score for Artist: {artist} Title: {title} Difficulty: {difficulty.name}"
     )
     log.info(f"Writing to sqlite: {textage_id} {difficulty} {score}")
-    return
     db_cursor.execute(
         score_query,
         {

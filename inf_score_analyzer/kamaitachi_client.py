@@ -123,17 +123,25 @@ def transform_scores(scores: list[tuple]) -> tuple[dict[str, Any], ...]:
 
 
 def export_to_kamaitachi(session_id: str) -> None:
+    log.info(
+        "Attempting to export to Kamaitachi...",
+    )
     if not CONSTANTS.TACHI_API_TOKEN:
         log.error(
             "Kamaitachi export failed, must set TACHI_API_TOKEN in env for script"
         )
         return
     scores = sqlite_client.get_scores_by_session(session_id)
+    log.info(f"Found {len(scores)} for session {session_id}")
     sp_scores_json, dp_scores_json = transform_scores(scores)
     if len(sp_scores_json["scores"]) > 0:
         submit_score_request(sp_scores_json)
+    else:
+        log.info(f"No SP scores found for session {session_id}")
     if len(dp_scores_json["scores"]) > 0:
         submit_score_request(dp_scores_json)
+    else:
+        log.info(f"No DP scores found for session {session_id}")
 
 
 def download_kamaitachi_song_list() -> dict[str, Any]:
