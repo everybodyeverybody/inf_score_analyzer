@@ -193,6 +193,8 @@ def normalize_textage_to_kamaitachi(
         # another new unique quoting here
         'ピアノ協奏曲第１番"蠍火" (BlackY Remix)': "1905",
         "≡＋≡": "2161",
+        # equals and multiplier signs are different
+        "恋愛=精度×認識力": "2252",
     }
 
     kamaitachi_titles = {}

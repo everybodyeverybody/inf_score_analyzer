@@ -269,7 +269,7 @@ def get_textage_version_data() -> dict[str, Any]:
         values = re.sub("D", "13", values)
         values = re.sub("E", "14", values)
         values = re.sub("F", "15", values)
-        values = re.sub(r"//\d+", "", values)
+        values = re.sub(r"//[a-zA-Z0-9]+", "", values)
         values = re.sub(',"<span.*span>"', "", values)
         key = re.sub("'", '"', key)
         return f"{key}:{values}\n"
