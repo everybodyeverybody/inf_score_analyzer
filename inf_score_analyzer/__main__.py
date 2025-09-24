@@ -31,6 +31,7 @@ from .local_dataclasses import (
 )
 from .song_reference import SongReference
 from . import kamaitachi_client
+from . import csv_processor
 
 
 def process_video(
@@ -215,6 +216,13 @@ def parse_arguments() -> argparse.Namespace:
         dest="video_source_id",
     )
     parser.add_argument(
+        "--csv",
+        type=str,
+        help=("Optional. A CSV file to import data from."),
+        default=None,
+        dest="csv_file",
+    )
+    parser.add_argument(
         "screenshots", help=("A list of paths to screenshots."), nargs="*"
     )
     return parser.parse_args()
@@ -223,6 +231,7 @@ def parse_arguments() -> argparse.Namespace:
 def startup() -> tuple[argparse.Namespace, SongReference]:
     args = parse_arguments()
     sqlite_client.sqlite_setup(args.force_update)
+    # TODO: make song reference a standalone module that can be called statically
     song_reference = sqlite_client.read_song_data_from_db()
     download_12sp_tables.download_and_normalize_data(song_reference)
     return args, song_reference
@@ -242,6 +251,13 @@ def main() -> None:
             )
         except KeyboardInterrupt:
             pass
+        finally:
+            shutdown(session_uuid)
+    elif args.csv_file:
+        try:
+            csv_processor.import_scores_from_csv(
+                session_uuid, Path(args.csv_file), song_reference
+            )
         finally:
             shutdown(session_uuid)
     else:

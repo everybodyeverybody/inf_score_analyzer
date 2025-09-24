@@ -17,6 +17,7 @@ from .local_dataclasses import (
     OCRGenres,
     NumberArea,
     TitleType,
+    calculate_grade_from_total_score,
 )
 
 from .song_reference import SongReference
@@ -35,7 +36,6 @@ from .frame_utilities import (
 from . import sqlite_client
 from . import constants as CONSTANTS
 from . import text_gradients
-from .score_frame_processor import calculate_grade_from_total_score
 
 from typing import Optional
 
@@ -443,7 +443,7 @@ def read_genre(frame: NDArray) -> OCRGenres:
     return OCRGenres(en_genre=en_genre, jp_genre=jp_genre)
 
 
-def __read_title_type(
+def read_song_select_title_type(
     song_select_title_slice: NDArray, difficulty: Difficulty
 ) -> TitleType:
     if difficulty in [Difficulty.SP_LEGGENDARIA, Difficulty.DP_LEGGENDARIA]:
@@ -478,33 +478,8 @@ def __read_title_type(
     return found_title_type
 
 
-def __read_title(frame: NDArray, title_type: TitleType):
-    if title_type == TitleType.LEGGENDARIA:
-        gradient = text_gradients.TITLE_LEGGENDARIA
-    elif title_type == TitleType.INFINITAS:
-        gradient = text_gradients.TITLE_INFINITAS
-    else:
-        gradient = text_gradients.TITLE_NORMAL
-    top_left_y = 517
-    top_left_x = 1305
-    bottom_right_x = 1871
-    bottom_right_y = 562
-    # log.debug(dump_colors(frame, 537, 1432, 552, 1434))
-    song_select_title_slice = get_rectanglular_subsection_from_frame(
-        frame, top_left_y, top_left_x, bottom_right_y, bottom_right_x
-    )
-    flatten_difficulty_gradients(
-        frame,
-        top_left_y,
-        top_left_x,
-        bottom_right_y,
-        bottom_right_x,
-        gradient,
-        match_level=0,
-        miss_level=255,
-    )
-    # show_frame(song_select_title_slice)
-    scaled_slice = cv.resize(song_select_title_slice, None, fx=2, fy=2)
+def read_title_with_type(title_slice: NDArray, title_type: TitleType):
+    scaled_slice = cv.resize(title_slice, None, fx=2, fy=2)
     en_title = str.strip(
         pytesseract.image_to_string(
             scaled_slice, lang="eng", config=CONSTANTS.PYTESSERACT_LINE_OF_TEXT
@@ -519,10 +494,36 @@ def __read_title(frame: NDArray, title_type: TitleType):
     jp_title = jp_title.replace("\n", "")
     log.debug(f"ENG SONG_SELECT_TITLE SONG: {en_title} ")
     log.debug(f"JPN SONG_SELECT_TITLE SONG: {jp_title}")
-
     return OCRSongTitles(
         en_title=en_title, en_artist="", jp_title=jp_title, jp_artist=""
     )
+
+
+def read_song_select_title(frame: NDArray, title_type: TitleType):
+    if title_type == TitleType.LEGGENDARIA:
+        gradient = text_gradients.TITLE_LEGGENDARIA
+    elif title_type == TitleType.INFINITAS:
+        gradient = text_gradients.TITLE_INFINITAS
+    else:
+        gradient = text_gradients.TITLE_NORMAL
+    top_left_y = 517
+    top_left_x = 1305
+    bottom_right_x = 1871
+    bottom_right_y = 562
+    flatten_difficulty_gradients(
+        frame,
+        top_left_y,
+        top_left_x,
+        bottom_right_y,
+        bottom_right_x,
+        gradient,
+        match_level=0,
+        miss_level=255,
+    )
+    song_select_title_slice = get_rectanglular_subsection_from_frame(
+        frame, top_left_y, top_left_x, bottom_right_y, bottom_right_x
+    )
+    return read_title_with_type(song_select_title_slice, title_type)
 
 
 def __read_artist(frame: NDArray):
@@ -663,8 +664,8 @@ def read_textage_id(
     # TODO: redo the workflow here such that we
     # can attempt to re-read stuff if we cannot
     # resolve it from title/artist
-    title_type = __read_title_type(frame, difficulty)
-    title = __read_title(frame, title_type)
+    title_type = read_song_select_title_type(frame, difficulty)
+    title = read_song_select_title(frame, title_type)
     # large_title = __read_large_title(frame, title_type)
     artist = __read_artist(frame)
     ocr_genres = read_genre(frame)

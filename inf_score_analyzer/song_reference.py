@@ -139,7 +139,9 @@ class SongReference:
             self.log.debug(f"found_artist_textage_id: {found_artist_textage_id}")
             return found_artist_textage_id
 
-        self.log.warning("Could not resolve OCR-provided artist/song titles directly.")
+        self.log.warning(
+            f"Could not resolve OCR-provided artist/song titles directly. {ocr_titles}"
+        )
         return None
 
     def resolve_ocr_and_metadata(

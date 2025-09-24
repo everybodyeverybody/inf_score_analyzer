@@ -179,7 +179,20 @@ def normalize_textage_to_kamaitachi(
         # fullwidth asterisk is very unique character
         "ハイ＊ビスカス ft. Kanae Asaba": "1737",
         # spacing and full width stuff
+        "炸裂！イェーガー電光チョップ!!": "1467",
         "炸裂！イェーガー電光チョップ!! (JAEGER FINAL ATTACK)": "1467",
+        # others we never imported
+        "覚悟せよ！エンタンメ〜ン 〜より身の切り売り自暴自棄版〜": "2531",
+        "惑 -perplexity-": "489",
+        "Chasing After YOU 〜夢の欠片〜 ft. 小林マナ": "2415",
+        "ËVOLUTIΦN": "1020",
+        "more deep (ver2.1)": "265",
+        "Punch Love ♥ 仮面": "817",
+        "Push on Beats! 〜音ゲの国のeX-ストリーマー〜": "2144",
+        "SANA MOLLETTE NE ENTE (B.L.T.STYLE)": "143",
+        "SANA MOLLETTE NE ENTE": "139",
+        "Stargazing Trip 〜星 探す旅〜 ft. 小林マナ": "2499",
+        "SμG@R RU$#": "2480",
         # quotes
         'ピアノ協奏曲第１番"蠍火"': "471",
         # the tildes aren't exact matches
@@ -275,8 +288,8 @@ def normalize_textage_to_kamaitachi(
         if title in special_cases:
             mapping[textage_id] = special_cases[title]
             continue
-        raise RuntimeError(
-            f"Could not determine kamaitachi ID for textage infinitas song: {textage_id} {title}"
+        log.error(
+            f"Could not determine kamaitachi ID for textage song: {textage_id} {title}"
         )
     log.info(f"Done normalizing data. Found {len(mapping)} matching songs.")
     return mapping

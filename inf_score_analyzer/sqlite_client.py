@@ -5,19 +5,20 @@ import uuid
 import logging
 import sqlite3
 from pathlib import Path
+from typing import Optional
 from datetime import datetime, date, timezone
 
 import numpy  # type: ignore
 from numpy.typing import NDArray  # type: ignore
 
 from . import constants as CONSTANTS
-from .download_textage_tables import get_infinitas_song_metadata
+from . import download_textage_tables
 from .kamaitachi_client import (
     download_kamaitachi_song_list,
     normalize_textage_to_kamaitachi,
 )
 from .song_reference import SongReference
-from .local_dataclasses import Score, OCRSongTitles, Difficulty
+from .local_dataclasses import Score, OCRSongTitles, Difficulty, ScoreDBRecord
 
 log = logging.getLogger(__name__)
 
@@ -251,7 +252,7 @@ def sqlite_setup(force_update: bool = False) -> None:
 
 
 def populate_song_metadata_into_db():
-    song_metadata = get_infinitas_song_metadata()
+    song_metadata = download_textage_tables.get_infinitas_song_metadata()
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     app_db_cursor = app_db_connection.cursor()
     song_difficulty_insert_query = (
@@ -405,20 +406,39 @@ def check_table_schema_for_column(db: Path, table_name: str, column: str) -> boo
     return column in results
 
 
+def write_score_from_record(db_record: ScoreDBRecord) -> None:
+    return write_score(
+        db_record.session_uuid,
+        db_record.textage_id,
+        db_record.score,
+        db_record.difficulty,
+        db_record.ocr_titles,
+        db_record.score_frame,
+    )
+
+
 def write_score(
     session_uuid: str,
     textage_id: str,
     score: Score,
     difficulty: Difficulty,
-    ocr_titles: OCRSongTitles,
-    score_frame: NDArray,
+    ocr_titles: Optional[OCRSongTitles] = None,
+    score_frame: Optional[NDArray] = None,
 ) -> None:
     difficulty_id = difficulty.value
     score_uuid = str(uuid.uuid4())
     end_time_utc = datetime.now(timezone.utc)
-    score_frame_bytes = io.BytesIO()
-    numpy.savez(score_frame_bytes, frame_slice=score_frame)
-    score_frame_bytes.seek(0)
+    if score_frame is not None:
+        score_frame_bytes = io.BytesIO()
+        numpy.savez(score_frame_bytes, frame_slice=score_frame)
+        score_frame_bytes.seek(0)
+        score_frame_bytes_value = score_frame_bytes.getvalue()
+    else:
+        score_frame_bytes = None
+        score_frame_bytes_value = None
+
+    if not ocr_titles:
+        ocr_titles = OCRSongTitles("", "", "", "")
 
     score_query = (
         "insert into score values ("
@@ -483,7 +503,7 @@ def write_score(
         ocr_query,
         {
             "score_uuid": score_uuid,
-            "result_screengrab": score_frame_bytes.getvalue(),
+            "result_screengrab": score_frame_bytes_value,
             "title_scaled": None,
             "en_title_ocr": ocr_titles.en_title,
             "en_artist_ocr": ocr_titles.en_artist,
@@ -506,6 +526,8 @@ def read_notes(textage_id: str, difficulty_id: int) -> int:
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     db_cursor = app_db_connection.cursor()
     results = db_cursor.execute(query).fetchall()
+    if not results:
+        log.error(query)
     return results[0][0]
 
 
