@@ -3,7 +3,6 @@
 import copy
 import logging
 from typing import Any
-from decimal import Decimal
 from concurrent.futures import ProcessPoolExecutor
 
 import cv2 as cv  # type: ignore
@@ -20,6 +19,7 @@ from .local_dataclasses import (
     GameStatePixel,
     VideoProcessingState,
     GameState,
+    calculate_grade_from_total_score,
 )
 from .song_reference import SongReference
 from .frame_utilities import (
@@ -30,6 +30,7 @@ from .frame_utilities import (
     get_numbers_from_area,
     check_pixel_color_in_frame,
     dump_to_png,
+    show_frame,
 )
 from . import constants as CONSTANTS
 
@@ -159,27 +160,6 @@ def score_digit_reader(block: NDArray) -> int:
                 return 0
 
 
-def calculate_grade_from_total_score(total_score: int, note_count: int) -> str:
-    max_score = note_count * 2
-    percentage = (Decimal(total_score) / Decimal(max_score)) * Decimal(100)
-    grade = "F"
-    if percentage >= Decimal("88.89"):
-        grade = "AAA"
-    elif percentage >= Decimal("77.78"):
-        grade = "AA"
-    elif percentage >= Decimal("66.67"):
-        grade = "A"
-    elif percentage >= Decimal("55.56"):
-        grade = "B"
-    elif percentage >= Decimal("44.44"):
-        grade = "C"
-    elif percentage >= Decimal("33.33"):
-        grade = "D"
-    elif percentage >= Decimal("22.22"):
-        grade = "E"
-    return grade
-
-
 def calculate_grade(perfect_greats: int, greats: int, note_count: int) -> str:
     score = perfect_greats * 2 + greats
     return calculate_grade_from_total_score(score, note_count)
@@ -287,11 +267,11 @@ def get_difficulty_and_level(frame: NDArray, is_double: bool) -> tuple[Difficult
     )
     # absolute screen area
     # legg = GameStatePixel(y=1040, x=722, b=255, g=104, r=253)
-    legg = GameStatePixel(y=4, x=4, b=250, g=104, r=250)
+    legg = GameStatePixel(y=4, x=4, b=240, g=104, r=240)
     # absolute screen area
     # another = GameStatePixel(y=1046, x=820, b=104, g=104, r=255)
-    another = GameStatePixel(y=9, x=101, b=104, g=90, r=250)
-    hyper = GameStatePixel(y=9, x=101, b=104, g=250, r=250)
+    another = GameStatePixel(y=9, x=101, b=104, g=90, r=240)
+    hyper = GameStatePixel(y=9, x=101, b=104, g=250, r=240)
     normal = GameStatePixel(y=9, x=101, b=250, g=250, r=104)
     level_size = Point(y=19, x=24)
     legg_level_start_pixel = Point(x=174, y=0)
@@ -511,26 +491,6 @@ def get_title_and_artist(frame: NDArray, ocr: ProcessPoolExecutor) -> OCRSongTit
     bottom_right_x = 1370
     song_title_bottom_right_y = 996
     artist_bottom_right_y = 1030
-
-    # TODO: extract this, see same code in play frame processor
-    grey_r = 145
-    grey_g = 145
-    grey_b = 145
-    for y in range(top_left_y, artist_bottom_right_y):
-        for x in range(top_left_x, bottom_right_x):
-            if (
-                frame[y][x][0] < grey_b
-                and frame[y][x][1] < grey_g
-                and frame[y][x][2] < grey_r
-            ):
-                frame[y][x][0] = 255
-                frame[y][x][1] = 255
-                frame[y][x][2] = 255
-            else:
-                frame[y][x][0] = 0
-                frame[y][x][1] = 0
-                frame[y][x][2] = 0
-
     song_frame_slice = get_rectanglular_subsection_from_frame(
         frame, top_left_y, top_left_x, song_title_bottom_right_y, bottom_right_x
     )
@@ -541,20 +501,43 @@ def get_title_and_artist(frame: NDArray, ocr: ProcessPoolExecutor) -> OCRSongTit
         artist_bottom_right_y,
         bottom_right_x,
     )
+
     en_title = str.strip(pytesseract.image_to_string(song_frame_slice, lang="eng"))
     jp_title = str.strip(pytesseract.image_to_string(song_frame_slice, lang="jpn"))
     en_artist = str.strip(pytesseract.image_to_string(artist_frame_slice, lang="eng"))
     jp_artist = str.strip(pytesseract.image_to_string(artist_frame_slice, lang="jpn"))
-    log.debug(f"ENG SONG: '{en_artist}' '{en_title}'")
-    log.debug(f"JPN SONG: '{jp_artist}' '{jp_title}'")
-
+    log.info(f"ENG SONG: '{en_artist}' '{en_title}'")
+    log.info(f"JPN SONG: '{jp_artist}' '{jp_title}'")
     if not en_title and not en_artist and not jp_title and not jp_artist:
+        log.warning("Could not find artist/title, upscaling.")
+        grey_r = 145
+        grey_b = 145
+        grey_g = 145
+        for y in range(top_left_y, artist_bottom_right_y):
+            for x in range(top_left_x, bottom_right_x):
+                if (
+                    frame[y][x][0] < grey_b
+                    and frame[y][x][1] < grey_g
+                    and frame[y][x][2] < grey_r
+                ):
+                    frame[y][x][0] = 255
+                    frame[y][x][1] = 255
+                    frame[y][x][2] = 255
+                else:
+                    frame[y][x][0] = 0
+                    frame[y][x][1] = 0
+                    frame[y][x][2] = 0
+
         scaled_song = cv.resize(song_frame_slice, None, fx=4, fy=4)
         scaled_artist = cv.resize(artist_frame_slice, None, fx=4, fy=4)
+        # show_frame(scaled_song)
+        # show_frame(scaled_artist)
         en_title = str.strip(pytesseract.image_to_string(scaled_song, lang="eng"))
         jp_title = str.strip(pytesseract.image_to_string(scaled_song, lang="jpn"))
         en_artist = str.strip(pytesseract.image_to_string(scaled_artist, lang="eng"))
         jp_artist = str.strip(pytesseract.image_to_string(scaled_artist, lang="jpn"))
+        log.info(f"ENG SONG: '{en_artist}' '{en_title}'")
+        log.info(f"JPN SONG: '{jp_artist}' '{jp_title}'")
         if not en_title and not en_artist and not jp_title and not jp_artist:
             raise RuntimeError("Could not read artist or title from frame")
 
@@ -568,10 +551,10 @@ def read_score_from_png(
     frame: NDArray, left_side: bool, is_double: bool, ocr: ProcessPoolExecutor
 ):
     is_double = get_play_type(frame)
+    difficulty, level = get_difficulty_and_level(frame, is_double)
     score = get_score_from_result_screen(frame, left_side, is_double)
     notes = get_note_count(frame)
     ocr_song_titles = get_title_and_artist(frame, ocr)
-    difficulty, level = get_difficulty_and_level(frame, is_double)
     return score, notes, ocr_song_titles, difficulty, level
 
 

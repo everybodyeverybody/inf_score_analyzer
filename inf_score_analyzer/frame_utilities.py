@@ -222,7 +222,8 @@ def read_pixel(block: NDArray, point: Point) -> list:
 
 def is_white_pixel(rgb_or_bgr: list) -> bool:
     log.debug(
-        "{} {} {}".format(
+        "IS WHITE {} {} {} {}".format(
+            rgb_or_bgr,
             rgb_or_bgr[0] >= QUANTIZED_WHITE_MAX,
             rgb_or_bgr[1] >= QUANTIZED_WHITE_MAX,
             rgb_or_bgr[2] >= QUANTIZED_WHITE_MAX,
@@ -279,7 +280,7 @@ def check_point_color(
 def check_pixel_color_in_frame(
     frame: NDArray,
     pixel: GameStatePixel,
-    tolerance: int = 15,
+    tolerance: int = 20,
 ) -> bool:
     if pixel.r >= 0:
         max_red = pixel.r + tolerance

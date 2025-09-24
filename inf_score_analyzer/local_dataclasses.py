@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from enum import Enum
 from concurrent.futures import Future
 from dataclasses import dataclass, field
@@ -29,6 +30,8 @@ class GameState(Enum):
 
 
 class Difficulty(Enum):
+    # This enum maps the difficulties to the indicies
+    # for song metadata in textage.cc's songlist table.
     SP_NORMAL = 2
     SP_HYPER = 3
     SP_ANOTHER = 4
@@ -46,6 +49,10 @@ class DifficultyType(Enum):
     ANOTHER = 2
     LEGGENDARIA = 3
     UNKNOWN = 99
+
+
+class ImportCsvType(Enum):
+    INF_SCORE_ANALYZER = 0
 
 
 @dataclass
@@ -107,15 +114,15 @@ class Alphanumeric(Enum):
 
 
 class ClearType(Enum):
-    FAILED = 0
-    ASSIST = 1
-    EASY = 2
-    NORMAL = 3
-    HARD = 4
-    EXHARD = 5
-    FULL_COMBO = 6
-    NO_PLAY = 7
-    UNKNOWN = 99
+    FAILED = "FAILED"
+    ASSIST = "ASSIST"
+    EASY = "EASY"
+    NORMAL = "NORMAL"
+    HARD = "HARD"
+    EXHARD = "EXHARD"
+    FULL_COMBO = "FULL_COMBO"
+    NO_PLAY = "NO_PLAY"
+    UNKNOWN = "UNKNOWN"
 
 
 @dataclass
@@ -125,6 +132,10 @@ class DifficultyMetadata:
     min_bpm: int = 0
     max_bpm: int = 0
     soflan: bool = False
+
+
+def generate_empty_score() -> Score:
+    return Score()
 
 
 def generate_difficulty_metadata() -> dict[Difficulty, DifficultyMetadata]:
@@ -263,6 +274,16 @@ class OCRGenres:
 
 
 @dataclass
+class ScoreDBRecord:
+    session_uuid: str
+    textage_id: str
+    score: Score = field(default_factory=generate_empty_score)
+    difficulty: Difficulty = Difficulty.UNKNOWN
+    ocr_titles: Optional[OCRSongTitles] = None
+    score_frame: Optional[NDArray] = None
+
+
+@dataclass
 class VideoProcessingState:
     score: Optional[Score] = None
     score_frame: Optional[NDArray] = None
@@ -365,3 +386,24 @@ class NumberArea:
     digits_per_row: int
     name: str
     kerning_offset: Optional[list[int]] = None
+
+
+def calculate_grade_from_total_score(total_score: int, note_count: int) -> str:
+    max_score = note_count * 2
+    percentage = (Decimal(total_score) / Decimal(max_score)) * Decimal(100)
+    grade = "F"
+    if percentage >= Decimal("88.89"):
+        grade = "AAA"
+    elif percentage >= Decimal("77.78"):
+        grade = "AA"
+    elif percentage >= Decimal("66.67"):
+        grade = "A"
+    elif percentage >= Decimal("55.56"):
+        grade = "B"
+    elif percentage >= Decimal("44.44"):
+        grade = "C"
+    elif percentage >= Decimal("33.33"):
+        grade = "D"
+    elif percentage >= Decimal("22.22"):
+        grade = "E"
+    return grade

@@ -165,9 +165,9 @@ def _read_difficulty(version_data: dict[str, Any]) -> dict[str, dict[Difficulty,
     return difficulties_by_textage_id
 
 
-def read_notes_and_bpm() -> (
-    tuple[dict[str, tuple[bool, int, int]], dict[str, dict[Difficulty, int]]]
-):
+def read_notes_and_bpm() -> tuple[
+    dict[str, tuple[bool, int, int]], dict[str, dict[Difficulty, int]]
+]:
     bpm_by_textage_id: dict[str, tuple[bool, int, int]] = {}
     notes_by_textage_id: dict[str, dict[Difficulty, int]] = {}
     notes_and_bpm = _get_textage_note_counts_and_bpm()
@@ -469,6 +469,7 @@ def _build_song_metadata_dict(
     version_data: dict[str, Any],
     song_titles: dict[str, Any],
     song_list: dict[str, list[str]],
+    join_with_space: bool = True,
 ) -> Any:
     all_difficulties = _read_difficulty(version_data)
     all_bpms, all_note_counts = read_notes_and_bpm()
@@ -479,7 +480,10 @@ def _build_song_metadata_dict(
         difficulty_metadata: dict[Difficulty, DifficultyMetadata] = {}
         song_difficulty: dict[Difficulty, int] = all_difficulties[textage_id]
         notes: dict[Difficulty, int] = all_note_counts[textage_id]
-        title = " ".join(song_list[textage_id][5:])
+        if join_with_space:
+            title = " ".join(song_list[textage_id][5:])
+        else:
+            title = "".join(song_list[textage_id][5:])
         version_id = int(song_list[textage_id][0])
         # substream is last in textage js
         if version_id == 35:
