@@ -2,7 +2,6 @@
 import os
 from typing import Any
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor
 
 import cv2 as cv  # type: ignore
 
@@ -125,23 +124,22 @@ def test_play_type_reader():
 
 
 def test_all():
-    with ProcessPoolExecutor(max_workers=1) as ocr:
-        for file, entry in SCORE_FILES_METADATA.items():
-            frame = cv.imread(file)
-            score, notes, ocr_titles, difficulty, level = (
-                score_frame_processor.read_score_from_png(
-                    frame, entry["left_side"], entry["is_double"], ocr
-                )
+    for file, entry in SCORE_FILES_METADATA.items():
+        frame = cv.imread(file)
+        score, notes, ocr_titles, difficulty, level = (
+            score_frame_processor.read_score_from_png(
+                frame, entry["left_side"], entry["is_double"]
             )
-            metadata_titles = SONG_REFERENCE.resolve_by_score_metadata(
-                difficulty.name, level, notes
-            )
-            tiebreak_data = sqlite_client.read_tiebreak_data(metadata_titles)
-            textage_id = SONG_REFERENCE.resolve_ocr_and_metadata(
-                ocr_titles, metadata_titles, tiebreak_data, difficulty, level
-            )
-            try:
-                assert textage_id == entry["textage_id"]
-            except:
-                print(f"{file} {entry}")
-                raise
+        )
+        metadata_titles = SONG_REFERENCE.resolve_by_score_metadata(
+            difficulty.name, level, notes
+        )
+        tiebreak_data = sqlite_client.read_tiebreak_data(metadata_titles)
+        textage_id = SONG_REFERENCE.resolve_ocr_and_metadata(
+            ocr_titles, metadata_titles, tiebreak_data, difficulty, level
+        )
+        try:
+            assert textage_id == entry["textage_id"]
+        except:
+            print(f"{file} {entry}")
+            raise

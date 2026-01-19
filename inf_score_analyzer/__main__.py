@@ -45,6 +45,33 @@ def process_video(
     ocr: ProcessPoolExecutor,
     video: cv.VideoCapture,
 ) -> None:
+    """
+    Reads song and score metadata from a live, raw hdmi stream of data.
+
+    The game loop goes between the following screen-types:
+
+    Song Select -> White Flash -> Song Selection Confirmed -> Fade to Black ->
+    Fade in to Play Screen -> Song Completion OR Song Failure Transition -> Fade to Black ->
+    Score Result Screen -> Song Select OR Retry Transition
+
+    Each of these screens contain different kinds of metadata about the song we
+    use to resolve what song is being played without directly going to OCR. The
+    ordering of screens is stable, so we can figure out where we're at in the
+    processing loop and read the available song metadata we need when it is available.
+    This is loaded into a VideoProcessingState that is generated and cleared once per loop.
+
+    We generally OCR asynchronously as to not interrup the state processing loop,
+    but there are cases where we try to resolve the title on the Score Result screen which
+    may call OCR and block temporarily.
+
+    The loop is currently broken by KeyboardInterrupt, the stream ending, process kills, or
+    unhandled exceptions. We tried to make this resillient to failure so that
+    most exceptions are handled by failing to read the score and not by crashing
+    out of the application.
+
+    This was previously the focus of this script, but I found it easier to dump
+    and process pngs in terms of my gaming PC setup, so I added that later.
+    """
     lookback = 90
     frame_count = 0
     v = VideoProcessingState()
@@ -171,18 +198,23 @@ def read_scores_from_pngs(
     song_reference: SongReference,
     manual_validation: bool,
 ) -> None:
-    with ProcessPoolExecutor(max_workers=1) as ocr:
-        for image in png_files:
-            logging.info(f"Reading score from {image}")
-            frame = cv.imread(str(image.absolute()))
-            game_state: GameState = get_game_state_from_frame(frame, state_pixels)
-            log.debug(f"PNG GAME STATE: {game_state}")
-            try:
-                if game_state in game_state_pixels.SCORE_STATES:
-                    textage_id, score, difficulty, ocr_titles = (
-                        score_frame_processor.read_score_and_song_metadata(
-                            frame, song_reference, game_state, ocr
-                        )
+    """
+    Use combination of module methods and tesseract to
+    read song score data from a screenshot of either the Song Select
+    screen or the Score Results screen.
+
+    We launch a subprocess to contain the tesseract worker subprocess.
+    """
+    for image in png_files:
+        log.info(f"Reading score from {image}")
+        frame = cv.imread(str(image.absolute()))
+        game_state: GameState = get_game_state_from_frame(frame, state_pixels)
+        log.debug(f"PNG GAME STATE: {game_state}")
+        try:
+            if game_state in game_state_pixels.SCORE_STATES:
+                textage_id, score, difficulty, ocr_titles = (
+                    score_frame_processor.read_score_and_song_metadata(
+                        frame, song_reference, game_state
                     )
                 elif game_state in game_state_pixels.SONG_SELECT_STATES:
                     textage_id, score, difficulty, ocr_titles = (
@@ -214,15 +246,34 @@ def read_scores_from_pngs(
                 sqlite_client.write_score(
                     session_uuid, textage_id, score, difficulty, ocr_titles, frame
                 )
-            except Exception as e:
+            elif game_state in game_state_pixels.SONG_SELECT_STATES:
+                textage_id, score, difficulty, ocr_titles = (
+                    song_select_frame_processor.read_score_and_song_metadata(
+                        frame, song_reference
+                    )
+                )
+            else:
                 log.error(
-                    f"Could not determine score from {image} and skipping : {e} : {traceback.format_exc()}"
+                    f"Could not read song select or score result from {image}, continuing"
                 )
                 continue
+            sqlite_client.write_score(
+                session_uuid, textage_id, score, difficulty, ocr_titles, frame
+            )
+        except Exception as e:
+            log.error(
+                f"Could not determine score from {image} and skipping : {e} : {traceback.format_exc()}"
+            )
+            continue
     return
 
 
 def load_pngs(png_files: list[str]) -> list[Path]:
+    """
+    Validate the list of files provided to the script that they exist
+    before attempting to read them. Skips any files not found by
+    the script with a warning.
+    """
     pngs: list[Path] = []
     for filename in png_files:
         absolute_location = Path(filename).absolute()
@@ -302,6 +353,11 @@ def get_screenshot_list_from_dir(batch_screenshot_dir: str) -> list[Path]:
 
 
 def startup() -> tuple[argparse.Namespace, SongReference]:
+    """
+    Reads in commandline arguments and sets up song metadata
+    sqlite entries, returning a SongReference for lookups
+    based on song metadata.
+    """
     args = parse_arguments()
     sqlite_client.sqlite_setup(args.force_update)
     # TODO: make song reference a standalone module that can be called statically
@@ -311,6 +367,17 @@ def startup() -> tuple[argparse.Namespace, SongReference]:
 
 
 def main() -> None:
+    """
+    Entrypoint. Each instantiation generates a session uuid
+    to mark off when scores were generated.
+
+    Depending on flags runs in either video, csv,
+    or png processing mode.
+
+    On completion of any processing loop, closes the session,
+    writes any unwritten score data to the db and attempts
+    to export the session's scores to kamaitachi.
+    """
     args, song_reference = startup()
     log.info(f"Running with arguments: {args}")
     session_uuid = start_session()

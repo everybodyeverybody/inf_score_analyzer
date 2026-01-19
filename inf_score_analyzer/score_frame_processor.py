@@ -3,7 +3,6 @@
 import copy
 import logging
 from typing import Any
-from concurrent.futures import ProcessPoolExecutor
 
 import cv2 as cv  # type: ignore
 import pytesseract  # type: ignore
@@ -30,7 +29,6 @@ from .frame_utilities import (
     get_numbers_from_area,
     check_pixel_color_in_frame,
     dump_to_png,
-    show_frame,
 )
 from . import constants as CONSTANTS
 
@@ -163,10 +161,6 @@ def score_digit_reader(block: NDArray) -> int:
 def calculate_grade(perfect_greats: int, greats: int, note_count: int) -> str:
     score = perfect_greats * 2 + greats
     return calculate_grade_from_total_score(score, note_count)
-
-
-def get_side_from_results_screen(frame: NDArray) -> Any:
-    pass
 
 
 def get_level(level_area: NDArray, color: tuple[int, int, int]) -> int:
@@ -324,6 +318,11 @@ def get_difficulty_and_level(frame: NDArray, is_double: bool) -> tuple[Difficult
 
 
 def get_play_type(frame: NDArray) -> bool:
+    """
+    Reads the song title data from the bottom of the
+    screen to determine if a given score frame represents
+    an SP (single) score or DP (double) score.
+    """
     start_x = 937
     start_y = 1037
     end_x = 986
@@ -485,7 +484,12 @@ def note_count_reader(block: NDArray) -> int:
                 return 0
 
 
-def get_title_and_artist(frame: NDArray, ocr: ProcessPoolExecutor) -> OCRSongTitles:
+def get_title_and_artist(frame: NDArray) -> OCRSongTitles:
+    """
+    Reads the title and artist data from a score result frame.
+    The positioning of the text is consistent across 1P/2P/SP/DP.
+
+    """
     top_left_y = 960
     top_left_x = 550
     bottom_right_x = 1370
@@ -530,8 +534,6 @@ def get_title_and_artist(frame: NDArray, ocr: ProcessPoolExecutor) -> OCRSongTit
 
         scaled_song = cv.resize(song_frame_slice, None, fx=4, fy=4)
         scaled_artist = cv.resize(artist_frame_slice, None, fx=4, fy=4)
-        # show_frame(scaled_song)
-        # show_frame(scaled_artist)
         en_title = str.strip(pytesseract.image_to_string(scaled_song, lang="eng"))
         jp_title = str.strip(pytesseract.image_to_string(scaled_song, lang="jpn"))
         en_artist = str.strip(pytesseract.image_to_string(scaled_artist, lang="eng"))
@@ -548,13 +550,12 @@ def get_title_and_artist(frame: NDArray, ocr: ProcessPoolExecutor) -> OCRSongTit
 
 
 def read_score_from_png(
-    frame: NDArray, left_side: bool, is_double: bool, ocr: ProcessPoolExecutor
-):
-    is_double = get_play_type(frame)
+    frame: NDArray, left_side: bool, is_double: bool
+) -> tuple[Score, int, OCRSongTitles, Difficulty, int]:
     difficulty, level = get_difficulty_and_level(frame, is_double)
     score = get_score_from_result_screen(frame, left_side, is_double)
     notes = get_note_count(frame)
-    ocr_song_titles = get_title_and_artist(frame, ocr)
+    ocr_song_titles = get_title_and_artist(frame)
     return score, notes, ocr_song_titles, difficulty, level
 
 
@@ -564,6 +565,16 @@ def update_video_processing_state(
     v: VideoProcessingState,
     song_reference: SongReference,
 ) -> None:
+    """
+    Used by the video processing loop.
+
+    When we encounter a score result frame in the video processing loop,
+    read in relevant score and song metadata that has not yet been set.
+
+    We then save the raw data of the frame to a gzipped dataframe for storage
+    in sqlite and future reference for bugs.
+    """
+
     # total note count only exists on the score frame
     if v.note_count is None:
         v.note_count = get_note_count(frame)
@@ -647,16 +658,28 @@ def read_score_and_song_metadata(
     frame: NDArray,
     song_reference: SongReference,
     game_state: GameState,
-    ocr: ProcessPoolExecutor,
-):
+) -> tuple[str, Score, Difficulty, OCRSongTitles]:
+    """
+    Given a Score Result frame or screenshot, generate score and
+    song metadata from information in the screenshot.
+
+    1P/2P is determined earlier in the loop by determining the type
+    of screen we're looking at.
+
+    This method specifically anticipates screenshots due to how the
+    video processing loop can read other song metadata during the gameplay
+    loop. This was written after initially doing video-only processing,
+    which is why this kind of logic exists in two spots. This is
+    a recurring theme in how I developed this.
+    """
+    # TODO: actually use the ocr process manager
     left_side = True
     play_side, _ = game_state.value.split("_")
     if play_side == "P2":
         left_side = False
     is_double = get_play_type(frame)
-    # TODO: have this run the ocr on the screen frame
     score, notes, ocr_titles, difficulty, level = read_score_from_png(
-        frame, left_side, is_double, ocr
+        frame, left_side, is_double
     )
     log.debug(f"returned score: {score}")
     log.debug(f"returned notes: {notes}")
@@ -666,10 +689,10 @@ def read_score_and_song_metadata(
     metadata_titles = song_reference.resolve_by_score_metadata(
         difficulty.name, level, notes
     )
-    # TODO: construct tiebreak data in songreference on initialization
     tiebreak_data = sqlite_client.read_tiebreak_data(metadata_titles)
-    # TODO: have resolve take the enum
     textage_id = song_reference.resolve_ocr_and_metadata(
         ocr_titles, metadata_titles, tiebreak_data, difficulty.name, level
     )
+    if textage_id is None:
+        raise RuntimeError("Could not determine textage_id from score screenshot")
     return textage_id, score, difficulty, ocr_titles
