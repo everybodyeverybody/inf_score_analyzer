@@ -655,9 +655,7 @@ def handle_score_transition(
 
 
 def read_score_and_song_metadata(
-    frame: NDArray,
-    song_reference: SongReference,
-    game_state: GameState,
+    frame: NDArray, song_reference: SongReference, game_state: GameState
 ) -> tuple[str, Score, Difficulty, OCRSongTitles]:
     """
     Given a Score Result frame or screenshot, generate score and
@@ -672,7 +670,6 @@ def read_score_and_song_metadata(
     which is why this kind of logic exists in two spots. This is
     a recurring theme in how I developed this.
     """
-    # TODO: actually use the ocr process manager
     left_side = True
     play_side, _ = game_state.value.split("_")
     if play_side == "P2":
