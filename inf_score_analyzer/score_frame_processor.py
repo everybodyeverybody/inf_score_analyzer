@@ -29,6 +29,7 @@ from .frame_utilities import (
     get_numbers_from_area,
     check_pixel_color_in_frame,
     dump_to_png,
+    show_frame,
 )
 from . import constants as CONSTANTS
 
@@ -505,14 +506,13 @@ def get_title_and_artist(frame: NDArray) -> OCRSongTitles:
         artist_bottom_right_y,
         bottom_right_x,
     )
-
     en_title = str.strip(pytesseract.image_to_string(song_frame_slice, lang="eng"))
     jp_title = str.strip(pytesseract.image_to_string(song_frame_slice, lang="jpn"))
     en_artist = str.strip(pytesseract.image_to_string(artist_frame_slice, lang="eng"))
     jp_artist = str.strip(pytesseract.image_to_string(artist_frame_slice, lang="jpn"))
     log.info(f"ENG SONG: '{en_artist}' '{en_title}'")
     log.info(f"JPN SONG: '{jp_artist}' '{jp_title}'")
-    if not en_title and not en_artist and not jp_title and not jp_artist:
+    if not en_title or not en_artist or not jp_title or not jp_artist:
         log.warning("Could not find artist/title, upscaling.")
         grey_r = 145
         grey_b = 145
@@ -534,10 +534,18 @@ def get_title_and_artist(frame: NDArray) -> OCRSongTitles:
 
         scaled_song = cv.resize(song_frame_slice, None, fx=4, fy=4)
         scaled_artist = cv.resize(artist_frame_slice, None, fx=4, fy=4)
-        en_title = str.strip(pytesseract.image_to_string(scaled_song, lang="eng"))
-        jp_title = str.strip(pytesseract.image_to_string(scaled_song, lang="jpn"))
-        en_artist = str.strip(pytesseract.image_to_string(scaled_artist, lang="eng"))
-        jp_artist = str.strip(pytesseract.image_to_string(scaled_artist, lang="jpn"))
+        if not en_title:
+            en_title = str.strip(pytesseract.image_to_string(scaled_song, lang="eng"))
+        if not jp_title:
+            jp_title = str.strip(pytesseract.image_to_string(scaled_song, lang="jpn"))
+        if not en_artist:
+            en_artist = str.strip(
+                pytesseract.image_to_string(scaled_artist, lang="eng")
+            )
+        if not jp_artist:
+            jp_artist = str.strip(
+                pytesseract.image_to_string(scaled_artist, lang="jpn")
+            )
         log.info(f"ENG SONG: '{en_artist}' '{en_title}'")
         log.info(f"JPN SONG: '{jp_artist}' '{jp_title}'")
         if not en_title and not en_artist and not jp_title and not jp_artist:
