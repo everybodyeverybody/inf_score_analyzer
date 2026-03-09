@@ -225,7 +225,23 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "screenshots", help=("A list of paths to screenshots."), nargs="*"
     )
+    parser.add_argument(
+        "--batch-screenshot-dir",
+        type=str,
+        help=(
+            "Optional. Will read all screenshots from a directory and attempt to parse them."
+        ),
+        default=None,
+        dest="batch_screenshot_dir",
+    )
     return parser.parse_args()
+
+
+def get_screenshot_list_from_dir(batch_screenshot_dir: str) -> list[Path]:
+    screenshot_dir_path = Path(batch_screenshot_dir)
+    return [
+        file for file in screenshot_dir_path.iterdir() if file.suffix.lower() == ".png"
+    ]
 
 
 def startup() -> tuple[argparse.Namespace, SongReference]:
@@ -262,7 +278,11 @@ def main() -> None:
             shutdown(session_uuid)
     else:
         try:
-            pngs = load_pngs(args.screenshots)
+            pngs: list[Path] = []
+            if args.batch_screenshot_dir:
+                pngs.extend(get_screenshot_list_from_dir(args.batch_screenshot_dir))
+            else:
+                pngs.extend(load_pngs(args.screenshots))
             read_scores_from_pngs(
                 pngs, game_state_pixels.ALL_STATE_PIXELS, session_uuid, song_reference
             )
