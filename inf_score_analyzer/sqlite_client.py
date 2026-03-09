@@ -337,6 +337,7 @@ def read_song_data_from_db() -> SongReference:
     songs_by_notes: dict[int, set[str]] = {}
     songs_by_difficulty_and_notes: dict[tuple[str, int, int], set[str]] = {}
     songs_by_genre: dict[str, set[str]] = {}
+    songs_by_textage_id: dict[str, dict[str, str]] = {}
     app_db_connection = sqlite3.connect(CONSTANTS.APP_DB)
     db_cursor = app_db_connection.cursor()
     result = db_cursor.execute(query)
@@ -368,6 +369,11 @@ def read_song_data_from_db() -> SongReference:
         songs_by_difficulty_and_notes[difficulty_and_notes_tuple].add(textage_id)
         songs_by_bpm[bpm_tuple].add(textage_id)
         songs_by_notes[notes].add(textage_id)
+        songs_by_textage_id[textage_id] = {
+            "artist": cleaned_artist,
+            "title": cleaned_title,
+            "genre": cleaned_genre,
+        }
     return SongReference(
         by_artist=songs_by_artist,
         by_difficulty=songs_by_difficulty,
@@ -376,6 +382,7 @@ def read_song_data_from_db() -> SongReference:
         by_bpm=songs_by_bpm,
         by_difficulty_and_notes=songs_by_difficulty_and_notes,
         by_genre=songs_by_genre,
+        by_textage_id=songs_by_textage_id,
     )
 
 

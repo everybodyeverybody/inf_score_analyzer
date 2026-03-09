@@ -18,6 +18,7 @@ class SongReference:
         default_factory=dict
     )
     by_genre: dict[str, set[str]] = field(default_factory=dict)
+    by_textage_id: dict[str, dict[str, str]] = field(default_factory=dict)
     log = logging.getLogger(__name__)
 
     def resolve_by_song_select_metadata(
