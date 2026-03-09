@@ -29,7 +29,6 @@ from .frame_utilities import (
     get_numbers_from_area,
     check_pixel_color_in_frame,
     dump_to_png,
-    show_frame,
 )
 from . import constants as CONSTANTS
 

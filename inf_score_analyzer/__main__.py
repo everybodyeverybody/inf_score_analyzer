@@ -243,21 +243,6 @@ def read_scores_from_pngs(
                         f"Rejecting {image} {textage_id} {score} {difficulty} {ocr_titles} manually"
                     )
                     continue
-
-                sqlite_client.write_score(
-                    session_uuid, textage_id, score, difficulty, ocr_titles, frame
-                )
-            elif game_state in game_state_pixels.SONG_SELECT_STATES:
-                textage_id, score, difficulty, ocr_titles = (
-                    song_select_frame_processor.read_score_and_song_metadata(
-                        frame, song_reference
-                    )
-                )
-            else:
-                log.error(
-                    f"Could not read song select or score result from {image}, continuing"
-                )
-                continue
             sqlite_client.write_score(
                 session_uuid, textage_id, score, difficulty, ocr_titles, frame
             )
