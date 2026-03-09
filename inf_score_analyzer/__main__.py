@@ -11,6 +11,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 # library imports
 import cv2 as cv  # type: ignore
+from numpy.typing import NDArray  # type: ignore
 
 # local imports
 from . import sqlite_client
@@ -25,9 +26,12 @@ from . import download_12sp_tables
 
 from . import constants as CONSTANTS
 from .local_dataclasses import (
+    Score,
     GameState,
+    Difficulty,
     GameStatePixel,
     VideoProcessingState,
+    OCRSongTitles,
 )
 from .song_reference import SongReference
 from . import kamaitachi_client
@@ -132,11 +136,40 @@ def video_capture(video_source_id: int = 0) -> Any:
         video_source.release()
 
 
+def manually_validate(
+    song_reference: SongReference,
+    image: Path,
+    textage_id: str,
+    score: Score,
+    difficulty: Difficulty,
+    ocr_titles: OCRSongTitles,
+    frame: NDArray,
+):
+    print("")
+    print(f"Here's the details of {image}:")
+    print(f"song: {song_reference.by_textage_id[textage_id]}")
+    print(f"score: {score}")
+    print(f"score: {difficulty}")
+    print("is this correct (y/n)?")
+    cv.imshow("Validation", frame)
+    answer = cv.waitKey(0)
+    print(answer)
+    if answer in [ord("y"), ord("Y")]:
+        print("Validated.")
+        valid = True
+    else:
+        print("Rejected.")
+        valid = False
+    print("")
+    return valid
+
+
 def read_scores_from_pngs(
     png_files: list[Path],
     state_pixels: list[GameStatePixel],
     session_uuid: str,
     song_reference: SongReference,
+    manual_validation: bool,
 ) -> None:
     with ProcessPoolExecutor(max_workers=1) as ocr:
         for image in png_files:
@@ -162,6 +195,22 @@ def read_scores_from_pngs(
                         f"Could not read song select or score result from {image}, continuing"
                     )
                     continue
+                if manual_validation:
+                    valid = manually_validate(
+                        song_reference,
+                        image,
+                        textage_id,
+                        score,
+                        difficulty,
+                        ocr_titles,
+                        frame,
+                    )
+                    if not valid:
+                        log.info(
+                            f"Rejecting {image} {textage_id} {score} {difficulty} {ocr_titles} manually"
+                        )
+                        continue
+
                 sqlite_client.write_score(
                     session_uuid, textage_id, score, difficulty, ocr_titles, frame
                 )
@@ -234,6 +283,14 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         dest="batch_screenshot_dir",
     )
+    parser.add_argument(
+        "--manual-validation",
+        action="store_true",
+        help=(
+            "Optional. Allows manual validation of screenshots. Used for debugging the script."
+        ),
+        dest="manual_validation",
+    )
     return parser.parse_args()
 
 
@@ -284,14 +341,20 @@ def main() -> None:
             else:
                 pngs.extend(load_pngs(args.screenshots))
             read_scores_from_pngs(
-                pngs, game_state_pixels.ALL_STATE_PIXELS, session_uuid, song_reference
+                pngs,
+                game_state_pixels.ALL_STATE_PIXELS,
+                session_uuid,
+                song_reference,
+                args.manual_validation,
             )
         finally:
             shutdown(session_uuid)
     return
 
 
-logging.basicConfig(level=logging.INFO, format=CONSTANTS.LOG_FORMAT)
+logging.basicConfig(
+    filename="inf_score_analyzer.log", level=logging.INFO, format=CONSTANTS.LOG_FORMAT
+)
 log = logging.getLogger(__name__)
 log.info("starting up")
 main()
