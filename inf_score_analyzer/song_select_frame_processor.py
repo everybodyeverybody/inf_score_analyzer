@@ -319,9 +319,11 @@ def process_song_select_bpm_digits(block: NDArray) -> int:
     return 0
 
 
-def read_max_bpm(frame: NDArray):
+def read_max_bpm(frame: NDArray, has_notes_radar: bool):
     top_left_y = 470
     top_left_x = 715
+    if has_notes_radar:
+        top_left_x = 665
     # bottom_right_y = 493
     # bottom_right_x = 805
     max_bpm_area = NumberArea(
@@ -362,11 +364,16 @@ def soflan_processor(block: NDArray):
     return 0
 
 
-def read_soflan(frame: NDArray) -> bool:
+def read_soflan(frame: NDArray, has_notes_radar: bool) -> bool:
+    """
+    Reads whether or not a song has soflan (bpm change) based on the
+    existence of a tilde '~' in the bpm section of the Song Select
+    Screen.
+    """
     top_left_y = 473
     top_left_x = 682
-    # bottom_right_y = 490
-    # bottom_right_x = 713
+    if has_notes_radar:
+        top_left_x = 632
     soflan_area = NumberArea(
         start_x=top_left_x,
         start_y=top_left_y,
@@ -381,9 +388,11 @@ def read_soflan(frame: NDArray) -> bool:
     return numbers == 1
 
 
-def read_min_bpm(frame: NDArray) -> int:
+def read_min_bpm(frame: NDArray, has_notes_radar: bool) -> int:
     top_left_y = 470
     top_left_x = 591
+    if has_notes_radar:
+        top_left_x = 541
     # bottom_right_y = 805
     # bottom_right_x = 681
     min_bpm_area = NumberArea(
@@ -401,21 +410,26 @@ def read_min_bpm(frame: NDArray) -> int:
     return numbers
 
 
-def read_bpm(frame: NDArray) -> tuple[int, int]:
-    max_bpm = read_max_bpm(frame)
-    min_bpm = max_bpm
-    has_soflan = read_soflan(frame)
+def read_bpm(frame: NDArray, has_notes_radar: bool) -> tuple[int, int]:
+    log.debug(f"HAS NOTES RADAR? {has_notes_radar}")
+    max_bpm = read_max_bpm(frame, has_notes_radar)
+    has_soflan = read_soflan(frame, has_notes_radar)
     log.debug(f"HAS SOFLAN? {has_soflan}")
     if has_soflan:
-        min_bpm = read_min_bpm(frame)
+        min_bpm = read_min_bpm(frame, has_notes_radar)
+    else:
+        min_bpm = max_bpm
     return min_bpm, max_bpm
 
 
-def read_genre(frame: NDArray) -> OCRGenres:
+def read_genre(frame: NDArray, has_notes_radar: bool) -> OCRGenres:
     top_left_y = 278
     top_left_x = 211
     bottom_right_x = 913
     bottom_right_y = 305
+    if has_notes_radar:
+        top_left_x = 161
+        bottom_right_x = 863
     _ = grayscale_area(frame, top_left_y, top_left_x, bottom_right_y, bottom_right_x)
     _ = polarize_area(
         frame,
@@ -526,11 +540,14 @@ def read_song_select_title(frame: NDArray, title_type: TitleType):
     return read_title_with_type(song_select_title_slice, title_type)
 
 
-def __read_artist(frame: NDArray):
+def read_artist(frame: NDArray, has_notes_radar: bool):
     top_left_y = 421
     top_left_x = 211
     bottom_right_x = 913
     bottom_right_y = 452
+    if has_notes_radar:
+        top_left_x = 161
+        bottom_right_x = 863
     _ = grayscale_area(frame, top_left_y, top_left_x, bottom_right_y, bottom_right_x)
     polarized_frame = polarize_area(
         frame, top_left_y, top_left_x, bottom_right_y, bottom_right_x
@@ -619,6 +636,11 @@ def process_score_and_miss_area(block: NDArray) -> int:
 
 
 def read_total_score(frame: NDArray) -> int:
+    """
+    Reads the total score from the Score Data
+    section on the bottom left of the Song Select
+    screen.
+    """
     score_area_start_x = 210
     score_area_start_y = 834
     # score_area_end_x = 295
@@ -637,6 +659,11 @@ def read_total_score(frame: NDArray) -> int:
 
 
 def read_miss_count(frame: NDArray):
+    """
+    Reads the miss count from the Score Data
+    section on the bottom left of the Song Select
+    screen.
+    """
     score_area_start_x = 210
     score_area_start_y = 862
     # score_area_end_x = 295
@@ -660,15 +687,15 @@ def read_textage_id(
     bpm: tuple[int, int],
     difficulty: Difficulty,
     difficulty_level: int,
+    has_notes_radar: bool,
 ) -> tuple[Optional[str], OCRSongTitles]:
     # TODO: redo the workflow here such that we
     # can attempt to re-read stuff if we cannot
     # resolve it from title/artist
     title_type = read_song_select_title_type(frame, difficulty)
     title = read_song_select_title(frame, title_type)
-    # large_title = __read_large_title(frame, title_type)
-    artist = __read_artist(frame)
-    ocr_genres = read_genre(frame)
+    artist = read_artist(frame, has_notes_radar)
+    ocr_genres = read_genre(frame, has_notes_radar)
     ocr_titles = OCRSongTitles(
         en_title=title.en_title,
         en_artist=artist.en_artist,
@@ -681,7 +708,7 @@ def read_textage_id(
         difficulty.name, difficulty_level, bpm, ocr_titles, ocr_genres
     )
     log.debug(f"LIKELY IDS: {likely_textage_ids}")
-    if len(likely_textage_ids) != 1:
+    if len(likely_textage_ids) > 1:
         tiebreak_data = sqlite_client.read_tiebreak_data(likely_textage_ids)
         textage_id = song_reference.resolve_ocr_and_metadata(
             ocr_titles,
@@ -698,18 +725,32 @@ def read_textage_id(
     return textage_id, ocr_titles
 
 
+def frame_has_notes_radar(frame: NDArray) -> bool:
+    """
+    Screenshots made before the notes radar update
+    will have a different margin for song title, genre,
+    and bpm data. We look for a place guaranteed to not be
+    alpha blended against the background and that is a solid
+    color to determine whether the screenshot uses the pre-patch
+    margin layout or post-past margin layout.
+    """
+    bpm_border_overlap = Point(x=816, y=474)
+    return not is_black(frame, bpm_border_overlap)
+
+
 def read_score_and_song_metadata(
     frame: NDArray, song_reference: SongReference
 ) -> tuple[str, Score, Difficulty, OCRSongTitles]:
+    has_notes_radar = frame_has_notes_radar(frame)
     difficulty, level = read_difficulty(frame)
     total_score = read_total_score(frame)
     clear_type = read_clear_type(frame)
     miss_count = read_miss_count(frame)
-    bpm = read_bpm(frame)
+    bpm = read_bpm(frame, has_notes_radar)
     log.debug(f"BPM IS {bpm}")
     log.debug(f"DIFFICULTY IS {difficulty.name} {level}")
     textage_id, ocr_titles = read_textage_id(
-        frame, song_reference, bpm, difficulty, level
+        frame, song_reference, bpm, difficulty, level, has_notes_radar
     )
     if not textage_id:
         raise RuntimeError(

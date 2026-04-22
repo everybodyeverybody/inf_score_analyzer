@@ -298,6 +298,7 @@ def get_textage_song_titles() -> dict[str, Any]:
         values = re.sub(r"^\[SS", "[-1", values)
         values = re.sub(r"\t", "", values)
         values = re.sub(r'"\s+', '"', values)
+        values = re.sub(r'"/*.+*/"', "", values)
         values = re.sub(r'\s+"', '"', values)
         key = re.sub("'", '"', key)
         # convert shiftjis-to-ascii-to-utf8

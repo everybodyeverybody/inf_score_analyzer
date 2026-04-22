@@ -62,7 +62,8 @@ for file in SONG_SELECT_FILES:
 def test_bpm_reader() -> None:
     for file, metadata in SONG_SELECT_FILES_METADATA.items():
         frame = cv.imread(file)
-        min_bpm, max_bpm = song_select_frame_processor.read_bpm(frame)
+        has_notes_radar = song_select_frame_processor.frame_has_notes_radar(frame)
+        min_bpm, max_bpm = song_select_frame_processor.read_bpm(frame, has_notes_radar)
         assert metadata["min_bpm"] == min_bpm
         assert metadata["max_bpm"] == max_bpm
 
@@ -98,10 +99,11 @@ def test_textage_id_reader() -> None:
         logging.debug(metadata)
         frame = cv.imread(file)
         difficulty, level = song_select_frame_processor.read_difficulty(frame)
-        bpm = song_select_frame_processor.read_bpm(frame)
+        has_notes_radar = song_select_frame_processor.frame_has_notes_radar(frame)
+        bpm = song_select_frame_processor.read_bpm(frame, has_notes_radar)
         try:
             textage_id, _ = song_select_frame_processor.read_textage_id(
-                frame, song_reference, bpm, difficulty, level
+                frame, song_reference, bpm, difficulty, level, has_notes_radar
             )
         except Exception:
             print("Could not find textage ID")
