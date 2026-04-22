@@ -404,7 +404,9 @@ def main() -> None:
 
 
 logging.basicConfig(
-    filename="inf_score_analyzer.log", level=logging.INFO, format=CONSTANTS.LOG_FORMAT
+    filename="inf_score_analyzer.log",
+    level=logging.INFO,
+    format=CONSTANTS.LOG_FORMAT,
 )
 log = logging.getLogger(__name__)
 log.info("starting up")
