@@ -170,6 +170,9 @@ def get_level(level_area: NDArray, color: tuple[int, int, int]) -> int:
     missing_corner_of_four = GameStatePixel(
         name="missing_corner_of_four", x=4, y=4, b=color[0], g=color[1], r=color[2]
     )
+    missing_corner_of_nine = GameStatePixel(
+        name="missing_corner_of_nine", x=3, y=4, b=color[0], g=color[1], r=color[2]
+    )
     bottom_right = GameStatePixel(
         name="bottom_right", x=20, y=14, b=color[0], g=color[1], r=color[2]
     )
@@ -237,7 +240,7 @@ def get_level(level_area: NDArray, color: tuple[int, int, int]) -> int:
                 return 6
         else:
             log.debug("PROBABLY 1 7 9")
-            if not check_pixel_color_in_frame(level_area, missing_corner_of_four):
+            if not check_pixel_color_in_frame(level_area, missing_corner_of_nine):
                 log.debug("PROBABLY 1 7")
                 if check_pixel_color_in_frame(level_area, single_digit_center):
                     log.debug("DEFINITELY 1")
@@ -313,6 +316,7 @@ def get_difficulty_and_level(frame: NDArray, is_double: bool) -> tuple[Difficult
     )
     # cv.imshow("beep", level_area)
     # _ = cv.waitKey(0)
+    # dump_to_png(level_area, "seven", 0)
     level = get_level(level_area, color)
     return difficulty, level
 
