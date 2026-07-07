@@ -177,45 +177,45 @@ def normalize_textage_to_kamaitachi(
     # across different encodings.
     special_cases: dict[str, str] = {
         # fullwidth asterisk is very unique character
-        "ハイ＊ビスカス ft. Kanae Asaba": "1737",
+        "ハイ＊ビスカス ft. Kanae Asaba": "S19d35e0b5a8c7562189",
         # spacing and full width stuff
-        "炸裂！イェーガー電光チョップ!!": "1467",
-        "炸裂！イェーガー電光チョップ!! (JAEGER FINAL ATTACK)": "1467",
+        "炸裂！イェーガー電光チョップ!!": "S19d35e0b49ab5930ae8",
+        "炸裂！イェーガー電光チョップ!! (JAEGER FINAL ATTACK)": "S19d35e0b49ab5930ae8",
         # others we never imported
-        "覚悟せよ！エンタンメ〜ン 〜より身の切り売り自暴自棄版〜": "2531",
-        "惑 -perplexity-": "489",
-        "Chasing After YOU 〜夢の欠片〜 ft. 小林マナ": "2415",
-        "ËVOLUTIΦN": "1020",
-        "more deep (ver2.1)": "265",
-        "Punch Love ♥ 仮面": "817",
-        "Push on Beats! 〜音ゲの国のeX-ストリーマー〜": "2144",
-        "SANA MOLLETTE NE ENTE (B.L.T.STYLE)": "143",
-        "SANA MOLLETTE NE ENTE": "139",
-        "Stargazing Trip 〜星 探す旅〜 ft. 小林マナ": "2499",
-        "SμG@R RU$#": "2480",
+        "覚悟せよ！エンタンメ〜ン 〜より身の切り売り自暴自棄版〜": "S19d35e0b8b137d7fb1e",
+        "惑 -perplexity-": "S19d35e0b0c61b239d3d",
+        "Chasing After YOU 〜夢の欠片〜 ft. 小林マナ": "S19d35e0b84fcdfdfbde",
+        "ËVOLUTIΦN": "S19d35e0b2d91b1e009c",
+        "more deep (ver2.1)": "S19d35e0afe56a196762",
+        "Punch Love ♥ 仮面": "S19d35e0b20ea1acdfc0",
+        "Push on Beats! 〜音ゲの国のeX-ストリーマー〜": "S19d35e0b740b1dc0c84",
+        "SANA MOLLETTE NE ENTE (B.L.T.STYLE)": "S19d35e0af6b0babcd90",
+        "SANA MOLLETTE NE ENTE": "S19d35e0af67c4f89de2",
+        "Stargazing Trip 〜星 探す旅〜 ft. 小林マナ": "S19d35e0b8a38fec09f5",
+        "SμG@R RU$#": "S19d35e0b89024fd51c2",
         # quotes
-        'ピアノ協奏曲第１番"蠍火"': "471",
+        'ピアノ協奏曲第１番"蠍火"': "S19d35e0b0b465140e92",
         # the tildes aren't exact matches
-        "A MINSTREL 〜 ver.short-scape 〜": "1033",
+        "A MINSTREL 〜 ver.short-scape 〜": "S19d35e0b2e6ea938782",
         # accented characters not in kamaitachi db
-        "L'amour et la liberté": "197",
+        "L'amour et la liberté": "S19d35e0afa1d978d41b",
         # ... gets shortened to … in many jp imes
-        "Leaving…": "583",
+        "Leaving…": "S19d35e0b124d0522d08",
         # kamaitachi uses full width ・・・ here
-        "LOVE WILL…": "111",
+        "LOVE WILL…": "S19d35e0af4b5d984250",
         # kamaitachi's is something unique vim cant display
-        "POLꓘAMAИIA": "1964",
+        "POLꓘAMAИIA": "S19d35e0b68b00229000",
         # spacing, black heart conversion
-        "Raspberry♥Heart (English version)": "499",
+        "Raspberry♥Heart (English version)": "S19d35e0b0d07c2146ed",
         # the schwa is not an exact codepoint match
-        "uәn": "2271",
+        "uәn": "S19d35e0b7bf4dc58cf8",
         # new unique character! need to fix the encoding here
-        "ジオメトリック�塔eィーパーティー": "2352",
+        "ジオメトリック�塔eィーパーティー": "S19d35e0b810a6b89cb9",
         # another new unique quoting here
-        'ピアノ協奏曲第１番"蠍火" (BlackY Remix)': "1905",
-        "≡＋≡": "2161",
+        'ピアノ協奏曲第１番"蠍火" (BlackY Remix)': "S19d35e0b6502836faa3",
+        "≡＋≡": "S19d35e0b7516d97f999",
         # equals and multiplier signs are different
-        "恋愛=精度×認識力": "2252",
+        "恋愛=精度×認識力": "S19d35e0b7ac3788e3ac",
     }
 
     kamaitachi_titles = {}
@@ -250,10 +250,6 @@ def normalize_textage_to_kamaitachi(
         entry_full_width_punctuation_no_spaces = re.sub(
             r"\s+", "", entry_full_width_punctuation
         )
-        if textage_id == "_geo_tea":
-            # TODO: fix
-            _ = "ジオメトリック∮ティーパーティー"
-            pass
         if title in kamaitachi_titles:
             mapping[textage_id] = kamaitachi_titles[title]
             continue
